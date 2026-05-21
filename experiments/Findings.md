@@ -53,3 +53,12 @@
 
 ### 6. Why used calibration ?
 - a generally good practice in classification problem _and_ also the task demands it even more, a DR system that is not calibrated is dangerous 
+
+
+### 7. Why not applying Calibration per class ?
+
+- different classes have different calibration needs (e.g., Class 2 ECE is 0.077, Class 0 is 0.022), which theoretically require individual corrections.
+- however, temperature scaling applies a single global temperature T to the logit vector; because softmax couples all classes together, adjusting one logit affects all other probabilities.
+- class-specific calibration (like vector scaling with 5 parameters or matrix scaling with 25 parameters) can overfit on a relatively small validation set link in this case (733 samples).
+- global temperature scaling is robust, average calibration that generalizes well without overfitting. 
+- It's not the best but for the given situation it's good enough

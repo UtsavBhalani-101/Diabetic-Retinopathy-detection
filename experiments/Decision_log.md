@@ -28,3 +28,13 @@
 
 6. Why used MC dropout ?
 - ans in [Findings](Findings.md)
+
+7. Why use calibration ?
+- 2 reasons: softmax outputs from NNs are systematically overconfident — a prediction of 0.9 doesn't mean 90% accuracy, it's usually lower _and_ in a DR screening system, a confident-but-wrong prediction (e.g. predicting "No DR" at 95% when the patient has Moderate DR) directly delays treatment
+- ECE (Expected Calibration Error) is used to measure miscalibration. It bins predictions by confidence, compares predicted confidence to actual accuracy per bin, and produces a single scalar gap. It's the standard metric for calibration in classification
+- per-class ECE is calculated because the calibration problems are class-specific: Class 2 (Moderate) has the highest ECE at 0.0768 — consistent with its confusion matrix errors and decision boundary instability from EXP_007/008. Class 0 (No DR) has the lowest at 0.0222 — majority class with distinct visual features. Classes 3/4 have low ECE (0.032, 0.0317) despite being minority classes, because severe DR features (hemorrhages, neovascularization) are visually discriminative. A single aggregate ECE would hide this 3.5x gap between class 2 and class 0
+- temperature scaling is used to correct calibration: it divides the logit vector by a single learned parameter T before softmax, softening or sharpening the entire distribution
+- T is applied globally (one scalar for all 5 classes) because softmax couples all logit values — changing one logit affects all 5 output probabilities, so per-class correction isn't possible with a single temperature parameter
+- per-class correction is not applied because would require vector scaling (5 parameters, one per class) or matrix scaling (25 parameters). With only 733 validation samples, fitting 5+ calibration parameters risks overfitting the calibration correction itself
+- the tradeoff is explicit: global T can't fix Class 2's 0.0768 ECE without also shifting Class 0's already-good 0.0222. But one robust parameter on 733 samples is more reliable than five noisy ones
+
