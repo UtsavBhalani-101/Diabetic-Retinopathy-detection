@@ -16,6 +16,7 @@ import os
 
 import torch
 import wandb
+import datetime
 from sklearn.metrics import cohen_kappa_score, confusion_matrix
 
 from .config      import (
@@ -161,12 +162,14 @@ def test_model(dataset_name: str, model_path: str, optimal_T: float,
     logger.info(f"  Uncertain + Wrong (caught)  : {( uncertain_mask & ~correct_mask).sum()}")
     logger.info(f"  Uncertain + Right (over-ref): {( uncertain_mask &  correct_mask).sum()}")
 
-    # ------------------------------------------------------------------
-    # 8.  Calibration plot
-    # ------------------------------------------------------------------
     os.makedirs("artifacts/calibration/plots", exist_ok=True)
     calib_path = f"artifacts/calibration/plots/calibration_{dataset_name.replace(' ', '_')}.png"
     per_class_calibration(calibrated_probs, all_labels_arr, save_path=calib_path)
+
+    # Backup timestamped plot
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_calib_path = f"artifacts/calibration/plots/calibration_{dataset_name.replace(' ', '_')}_{timestamp}.png"
+    per_class_calibration(calibrated_probs, all_labels_arr, save_path=backup_calib_path)
 
     # ------------------------------------------------------------------
     # 9.  wandb log

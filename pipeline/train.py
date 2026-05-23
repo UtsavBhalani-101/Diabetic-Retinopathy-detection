@@ -9,6 +9,7 @@ import os
 import numpy as np
 import torch
 import wandb
+import datetime
 from sklearn.metrics import cohen_kappa_score
 
 from .config       import (
@@ -270,6 +271,11 @@ def train_model(dataset_name: str, config: dict) -> float:
     calib_path = config.get("calib_plot_train_path", "artifacts/calibration/plots/calibration_train.png")
     per_class_calibration(calibrated_probs, all_labels_arr, save_path=calib_path)
 
+    # Backup timestamped plot
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_calib_path = os.path.join(os.path.dirname(calib_path), f"calibration_train_{timestamp}.png")
+    per_class_calibration(calibrated_probs, all_labels_arr, save_path=backup_calib_path)
+
     final_qwk = cohen_kappa_score(all_labels_arr, final_preds, weights="quadratic")
     logger.info(f"Final calibrated val QWK: {final_qwk:.4f}")
 
@@ -295,8 +301,15 @@ def train_model(dataset_name: str, config: dict) -> float:
 
     torch.save(model.state_dict(), model_path)
     np.save(T_path, np.array(optimal_T))
-    logger.info(f"Model saved     → {model_path}")
-    logger.info(f"Optimal T saved → {T_path}  (T={optimal_T:.4f})")
+
+    # Backup timestamped weight and T parameters
+    backup_model_path = os.path.join(os.path.dirname(model_path), f"aptos_efficientnet_{timestamp}.pth")
+    backup_T_path = os.path.join(os.path.dirname(T_path), f"optimal_T_{timestamp}.npy")
+    torch.save(model.state_dict(), backup_model_path)
+    np.save(backup_T_path, np.array(optimal_T))
+
+    logger.info(f"Model saved     → {model_path} (Backup: {backup_model_path})")
+    logger.info(f"Optimal T saved → {T_path} (Backup: {backup_T_path}) (T={optimal_T:.4f})")
 
     wandb.finish()
     logger.info("train_model() complete.")

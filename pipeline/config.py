@@ -9,6 +9,7 @@
 import sys
 import os
 import logging
+import datetime
 
 # Make the project root importable when this package is run from any CWD
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -26,14 +27,15 @@ def setup_logging(log_dir: str = "artifacts/logs", level: int = logging.INFO) ->
     """
     Configure the root logger with:
       - A StreamHandler that prints to stdout with timestamps
-      - A FileHandler that appends to  <log_dir>/pipeline.log
+      - A FileHandler that writes to  <log_dir>/pipeline_<timestamp>.log
 
     Call this ONCE at the very start of run.py (or your notebook).
     All subsequent  logging.getLogger(__name__)  calls in every pipeline
     module will inherit these handlers automatically.
     """
     os.makedirs(log_dir, exist_ok=True)
-    log_file = os.path.join(log_dir, "pipeline.log")
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = os.path.join(log_dir, f"pipeline_{timestamp}.log")
 
     fmt = logging.Formatter(
         fmt="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
