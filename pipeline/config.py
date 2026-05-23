@@ -1,25 +1,76 @@
 # pipeline/config.py
 # ============================================================
 # Central configuration:
-#   - BASE_CONFIG  : all hyper-parameters consumed by train_model / test_model
-#   - DATASET_REGISTRY re-exported from root utils.py so every pipeline
-#     module only needs to import from here (single source of truth)
+#   - setup_logging()   : configures console + file handlers once
+#   - BASE_CONFIG       : all hyperparameters consumed by train/test
+#   - DATASET_REGISTRY  : re-exported from root utils.py
 # ============================================================
 
 import sys
 import os
+import logging
 
 # Make the project root importable when this package is run from any CWD
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from utils import DATASET_REGISTRY  # noqa: E402  (imported after sys.path fix)
+from utils import DATASET_REGISTRY  # noqa: E402
+
 
 # ----------------------------------------------------------------
-# BASE_CONFIG — edit here to change any hyper-parameter globally.
-# Individual keys can be overridden when calling train_model /
-# test_model by passing a modified copy of this dict.
+# Logging setup — call once at the start of run.py (or any entry point)
+# ----------------------------------------------------------------
+
+def setup_logging(log_dir: str = "artifacts", level: int = logging.INFO) -> None:
+    """
+    Configure the root logger with:
+      - A StreamHandler that prints to stdout with timestamps
+      - A FileHandler that appends to  <log_dir>/pipeline.log
+
+    Call this ONCE at the very start of run.py (or your notebook).
+    All subsequent  logging.getLogger(__name__)  calls in every pipeline
+    module will inherit these handlers automatically.
+    """
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, "pipeline.log")
+
+    fmt = logging.Formatter(
+        fmt="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    # Force stdout to UTF-8 on Windows (avoids CP1252 UnicodeEncodeError)
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+    # Console handler
+    ch = logging.StreamHandler(sys.stdout)
+    ch.setLevel(level)
+    ch.setFormatter(fmt)
+
+    # File handler (append mode — keeps the full run history)
+    fh = logging.FileHandler(log_file, mode="a", encoding="utf-8")
+    fh.setLevel(level)
+    fh.setFormatter(fmt)
+
+    root = logging.getLogger()
+    root.setLevel(level)
+
+    # Avoid adding duplicate handlers if called more than once
+    if not root.handlers:
+        root.addHandler(ch)
+        root.addHandler(fh)
+    else:
+        root.handlers.clear()
+        root.addHandler(ch)
+        root.addHandler(fh)
+
+    logging.info(f"Logging initialised → console + {log_file}")
+
+
+# ----------------------------------------------------------------
+# BASE_CONFIG — edit here to change any hyperparameter globally.
 # ----------------------------------------------------------------
 BASE_CONFIG: dict = {
     # ---- wandb ----

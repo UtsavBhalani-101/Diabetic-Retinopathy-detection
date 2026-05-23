@@ -6,8 +6,13 @@
 #   - apply_temperature     : scale logits by T and return softmax probs
 # ============================================================
 
+import logging
+import os
+
 import numpy as np
 import matplotlib.pyplot as plt
+
+logger = logging.getLogger(__name__)
 
 
 def per_class_calibration(mean_probs: np.ndarray, labels: np.ndarray,
@@ -15,10 +20,12 @@ def per_class_calibration(mean_probs: np.ndarray, labels: np.ndarray,
                            save_path: str = "artifacts/calibration.png") -> None:
     """
     Plot one reliability diagram per class and print ECE for each.
-
     A perfectly calibrated model's bars sit on the diagonal dashed line.
     ECE = weighted mean of |confidence − accuracy| across bins.
     """
+    logger.info(f"per_class_calibration() | n_classes={n_classes} | save_path={save_path}")
+    os.makedirs(os.path.dirname(save_path) if os.path.dirname(save_path) else ".", exist_ok=True)
+
     fig, axes = plt.subplots(1, n_classes, figsize=(4 * n_classes, 4))
     class_names = ["No DR", "Mild", "Moderate", "Severe", "Proliferative"]
 
@@ -58,12 +65,12 @@ def per_class_calibration(mean_probs: np.ndarray, labels: np.ndarray,
         ax.set_ylim(0, 1)
         ax.legend(fontsize=7)
 
-        print(f"Class {c} ({class_names[c]}) ECE: {ece:.4f}")
+        logger.info(f"  Class {c} ({class_names[c]}) ECE: {ece:.4f}")
 
     plt.tight_layout()
     plt.savefig(save_path)
-    plt.show()
-    print(f"Calibration plot saved to {save_path}")
+    plt.close(fig)   # avoid display blocking in non-interactive environments
+    logger.info(f"Calibration plot saved → {save_path}")
 
 
 def find_temperature(logits: np.ndarray, labels: np.ndarray,
@@ -72,7 +79,7 @@ def find_temperature(logits: np.ndarray, labels: np.ndarray,
     Find the scalar temperature T that minimises the average ECE across
     all classes on the validation set.
 
-    Uses scipy's bounded scalar optimiser over T ∈ [0.1, 10.0].
+    Uses scipy's bounded scalar optimiser over T in [0.1, 10.0].
 
     Parameters
     ----------
@@ -85,6 +92,8 @@ def find_temperature(logits: np.ndarray, labels: np.ndarray,
     """
     from scipy.optimize import minimize_scalar
     from scipy.special import softmax as scipy_softmax
+
+    logger.info("find_temperature() | searching optimal T in [0.1, 10.0]...")
 
     def ece_given_T(T: float) -> float:
         scaled_probs = scipy_softmax(logits / T, axis=1)
@@ -114,9 +123,10 @@ def find_temperature(logits: np.ndarray, labels: np.ndarray,
 
     result    = minimize_scalar(ece_given_T, bounds=(0.1, 10.0), method="bounded")
     optimal_T = result.x
-    print(f"Optimal T:          {optimal_T:.4f}")
-    print(f"ECE before scaling: {ece_given_T(1.0):.4f}")
-    print(f"ECE after  scaling: {ece_given_T(optimal_T):.4f}")
+
+    logger.info(f"find_temperature() | optimal T = {optimal_T:.4f}")
+    logger.info(f"find_temperature() | ECE before scaling (T=1.0): {ece_given_T(1.0):.4f}")
+    logger.info(f"find_temperature() | ECE after  scaling (T={optimal_T:.2f}): {ece_given_T(optimal_T):.4f}")
     return optimal_T
 
 
@@ -134,4 +144,6 @@ def apply_temperature(logits: np.ndarray, T: float) -> np.ndarray:
     calibrated_probs : [N, C]
     """
     from scipy.special import softmax as scipy_softmax
-    return scipy_softmax(logits / T, axis=1)
+    calibrated = scipy_softmax(logits / T, axis=1)
+    logger.debug(f"apply_temperature() | T={T:.4f} applied to {logits.shape[0]} samples")
+    return calibrated

@@ -5,6 +5,8 @@
 #   - build_loader_for_testing     → single loader (full dataset or official test split)
 # ============================================================
 
+import logging
+
 import pandas as pd
 from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
@@ -19,6 +21,8 @@ from .dataset import (
     g,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def build_loaders_for_training(dataset_name: str, config: dict):
     """
@@ -29,15 +33,23 @@ def build_loaders_for_training(dataset_name: str, config: dict):
     -------
     train_loader, val_loader, train_df, val_df
     """
+    logger.info(f"[{dataset_name}] Building training loaders...")
+
     reg      = DATASET_REGISTRY[dataset_name]
     df       = pd.read_csv(reg["target_path"]).reset_index(drop=True)
     diag_col = reg["diagnosis_col"]
+
+    logger.info(f"[{dataset_name}] CSV loaded: {len(df)} rows from {reg['target_path']}")
+    logger.info(f"[{dataset_name}] Class distribution:\n{df[diag_col].value_counts().sort_index().to_string()}")
 
     train_df, val_df = train_test_split(
         df,
         test_size=0.2,
         random_state=config["seed"],
         stratify=df[diag_col]
+    )
+    logger.info(
+        f"[{dataset_name}] Stratified split → train: {len(train_df)} | val: {len(val_df)}"
     )
 
     train_dataset = RetinopathyDatasetFromDF(
@@ -76,7 +88,10 @@ def build_loaders_for_training(dataset_name: str, config: dict):
         prefetch_factor=config["prefetch_factor"]
     )
 
-    print(f"[{dataset_name}] Train: {len(train_df)} | Val: {len(val_df)}")
+    logger.info(
+        f"[{dataset_name}] DataLoaders ready "
+        f"| batch={config['batch_size']} | workers={config['num_workers']}"
+    )
     return train_loader, val_loader, train_df, val_df
 
 
@@ -87,7 +102,6 @@ def build_loader_for_testing(dataset_name: str, config: dict,
 
     If use_test_split=True **and** the registry has 'test_target_path',
     the official held-out test images/CSV are used (e.g. IDRiD test set).
-    Otherwise the full training CSV is used for zero-shot evaluation.
 
     Returns
     -------
@@ -98,11 +112,11 @@ def build_loader_for_testing(dataset_name: str, config: dict,
     if use_test_split and "test_target_path" in reg:
         target_path = reg["test_target_path"]
         image_path  = reg["test_image_path"]
-        print(f"[{dataset_name}] Using official TEST split for evaluation.")
+        logger.info(f"[{dataset_name}] Using official TEST split for evaluation")
     else:
         target_path = reg["target_path"]
         image_path  = reg["image_path"]
-        print(f"[{dataset_name}] Using full training CSV for evaluation (zero-shot).")
+        logger.info(f"[{dataset_name}] Using full training CSV for evaluation (zero-shot)")
 
     dataset = RetinopathyDataset(
         input_path=image_path,
@@ -122,5 +136,8 @@ def build_loader_for_testing(dataset_name: str, config: dict,
         prefetch_factor=config["prefetch_factor"]
     )
 
-    print(f"[{dataset_name}] Test samples: {len(dataset)}")
+    logger.info(
+        f"[{dataset_name}] Test loader ready | samples={len(dataset)} "
+        f"| batch={config['batch_size']}"
+    )
     return loader

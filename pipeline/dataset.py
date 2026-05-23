@@ -7,6 +7,7 @@
 #   - RetinopathyDatasetFromDF (DF-backed,  used for train/val split)
 # ============================================================
 
+import logging
 import random
 import os
 
@@ -17,15 +18,19 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 import pandas as pd
 
+logger = logging.getLogger(__name__)
+
 
 # ^ ------------------------------- setting gpu ----------------------------------
 
 def setting_gpu() -> torch.device:
-    """Detect GPU, print name, and return a torch.device."""
+    """Detect GPU, log name, and return a torch.device."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+    logger.info(f"Device selected: {device}")
     if torch.cuda.is_available():
-        print(f"GPU Name: {torch.cuda.get_device_name(0)}")
+        logger.info(f"GPU: {torch.cuda.get_device_name(0)}")
+    else:
+        logger.warning("No GPU found — running on CPU (will be slow for training)")
     return device
 
 
@@ -40,6 +45,7 @@ def set_seed(seed: int = 42) -> None:
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+    logger.debug(f"Random seed fixed: {seed}")
 
 
 # Worker-level seed fn — passed as worker_init_fn to DataLoader
@@ -74,6 +80,8 @@ train_transformer = transforms.Compose([
                          std=[0.229, 0.224, 0.225])
 ])
 
+logger.debug("Train and val transforms defined")
+
 
 # ^ -------------------------- dataset classes --------------------------
 
@@ -85,20 +93,24 @@ class RetinopathyDataset(Dataset):
 
     def __init__(self, input_path, target_path, image_col, diagnosis_col,
                  transforms, extension, num_samples=None):
-        self.img_path     = input_path
-        self.extension    = extension
-        self.image_col    = image_col
+        self.img_path      = input_path
+        self.extension     = extension
+        self.image_col     = image_col
         self.diagnosis_col = diagnosis_col
         self.df = pd.read_csv(target_path).reset_index(drop=True)
         if num_samples is not None:
             self.df = self.df.sample(n=num_samples, random_state=42).reset_index(drop=True)
+            logger.debug(f"RetinopathyDataset: sampled {num_samples} rows from CSV")
         self.transform = transforms
+        logger.info(
+            f"RetinopathyDataset | path={target_path} | rows={len(self.df)} | ext={extension}"
+        )
 
     def __len__(self):
         return len(self.df)
 
     def __getitem__(self, idx):
-        row   = self.df.iloc[idx]
+        row    = self.df.iloc[idx]
         img_id = row[self.image_col]
         label  = row[self.diagnosis_col]
         img_path = os.path.join(self.img_path, f"{img_id}.{self.extension}")
@@ -117,12 +129,15 @@ class RetinopathyDatasetFromDF(Dataset):
 
     def __init__(self, df, image_path, image_col, diagnosis_col,
                  transform, extension):
-        self.df           = df.reset_index(drop=True)
-        self.img_path     = image_path
-        self.image_col    = image_col
+        self.df            = df.reset_index(drop=True)
+        self.img_path      = image_path
+        self.image_col     = image_col
         self.diagnosis_col = diagnosis_col
-        self.transform    = transform
-        self.extension    = extension
+        self.transform     = transform
+        self.extension     = extension
+        logger.info(
+            f"RetinopathyDatasetFromDF | rows={len(self.df)} | ext={extension}"
+        )
 
     def __len__(self):
         return len(self.df)

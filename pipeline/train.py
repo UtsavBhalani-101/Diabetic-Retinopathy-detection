@@ -1,18 +1,9 @@
 # pipeline/train.py
 # ============================================================
 # Full training pipeline for a single dataset (APTOS_2019).
-#
-# Responsibilities:
-#   1. Build train / val loaders (stratified 80/20 split)
-#   2. Init model, optimizer, class-weighted criterion
-#   3. wandb init with full config (dynamic fields filled in here)
-#   4. Epoch loop: train → val → lightweight MC dropout (T=10)
-#   5. Post-loop: full MC dropout (T=30) → temperature scaling
-#      → post-calibration triage / stats / calibration plot only
-#   6. Save model weights + optimal_T to artifacts/
-#   7. wandb finish  |  return optimal_T
 # ============================================================
 
+import logging
 import os
 
 import numpy as np
@@ -26,6 +17,8 @@ from .loaders      import build_loaders_for_training
 from .model        import EfficientNetMC, get_loss_criterion
 from .evaluate     import evaluate, mc_evaluate_full, compute_uncertainty_signals
 from .calibration  import find_temperature, apply_temperature, per_class_calibration
+
+logger = logging.getLogger(__name__)
 
 
 def train_model(dataset_name: str, config: dict) -> float:
@@ -45,6 +38,10 @@ def train_model(dataset_name: str, config: dict) -> float:
     -------
     optimal_T : float
     """
+    logger.info(f"{'='*60}")
+    logger.info(f"train_model() | dataset={dataset_name} | starting")
+    logger.info(f"{'='*60}")
+
     device = setting_gpu()
     set_seed(config["seed"])
 
@@ -62,15 +59,21 @@ def train_model(dataset_name: str, config: dict) -> float:
     # ------------------------------------------------------------------
     # 2.  Model, optimizer, criterion
     # ------------------------------------------------------------------
-    criterion     = get_loss_criterion(train_df, diag_col, device)
+    criterion      = get_loss_criterion(train_df, diag_col, device)
     weights_tensor = criterion.weight.cpu().numpy()
 
     model = EfficientNetMC(
         num_classes=num_classes,
-        dropout_rate=config["dropout_rate"]
+        dropout_rate=config["dropout_rate"],
+        pretrained=config.get("pretrained", True)
     ).to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config["lr"])
+
+    total_params     = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    logger.info(f"Model params | total={total_params:,} | trainable={trainable_params:,}")
+    logger.info(f"Optimizer | Adam | lr={config['lr']}")
 
     # ------------------------------------------------------------------
     # 3.  wandb init — all static + dynamic fields in one dict
@@ -108,22 +111,25 @@ def train_model(dataset_name: str, config: dict) -> float:
     run = wandb.init(  # noqa: F841
         project=config["project_name"],
         config=run_config,
-        job_type="train"
+        job_type="train",
+        mode=config.get("wandb_mode", "online")
     )
+    logger.info(f"wandb run initialised | project={config['project_name']} | job=train")
 
     # ------------------------------------------------------------------
     # 4.  Epoch loop
     # ------------------------------------------------------------------
-    print("\nTraining loop start...")
+    logger.info(f"Training loop start | epochs={config['epochs']}")
     os.makedirs("artifacts", exist_ok=True)
 
     for epoch in range(config["epochs"]):
+        logger.info(f"--- Epoch {epoch + 1}/{config['epochs']} ---")
 
         # ---- train ----
         model.train()
         running_loss = 0.0
 
-        for images, labels in train_loader:
+        for batch_idx, (images, labels) in enumerate(train_loader):
             images = images.to(device)
             labels = labels.to(device)
 
@@ -135,17 +141,27 @@ def train_model(dataset_name: str, config: dict) -> float:
 
             running_loss += loss.item()
 
+            # log every 10 batches at DEBUG
+            if (batch_idx + 1) % 10 == 0:
+                logger.debug(
+                    f"  Batch {batch_idx + 1}/{len(train_loader)} "
+                    f"| loss={loss.item():.4f}"
+                )
+
         train_loss = running_loss / len(train_loader)
-        print(f"\nEpoch {epoch + 1} | Train Loss: {train_loss:.4f}")
+        logger.info(f"Epoch {epoch + 1} | Train Loss: {train_loss:.4f}")
 
         # ---- standard validation ----
         val_loss, val_qwk, matrix, val_preds, val_labels = evaluate(
             model, val_loader, criterion, device
         )
-        print(f"Epoch {epoch + 1} | Val Loss: {val_loss:.4f} | Val QWK: {val_qwk:.4f}")
-        print("Confusion Matrix:\n", matrix)
+        logger.info(
+            f"Epoch {epoch + 1} | Val Loss: {val_loss:.4f} | Val QWK: {val_qwk:.4f}"
+        )
+        logger.info(f"Confusion Matrix:\n{matrix}")
 
-        # ---- lightweight MC dropout (T=10) — epoch-level uncertainty tracking ----
+        # ---- lightweight MC dropout (T=10) epoch-level uncertainty tracking ----
+        logger.debug(f"Epoch {epoch + 1} | Running MC dropout (T=10) for uncertainty tracking...")
         mean_prob_loop, uncertainty_loop, _, _ = mc_evaluate_full(
             model, val_loader, device, T=10
         )
@@ -155,38 +171,43 @@ def train_model(dataset_name: str, config: dict) -> float:
         uncertain_frac = float(
             ((entropy_loop > 1.0) | (margin_loop < 0.3) | (mc_unc_loop > 0.05)).mean()
         )
+        logger.info(
+            f"Epoch {epoch + 1} | MC uncertainty | "
+            f"entropy={entropy_loop.mean():.4f} | margin={margin_loop.mean():.4f} "
+            f"| uncertain_frac={uncertain_frac:.3f}"
+        )
 
         wandb.log({
-            "epoch":              epoch + 1,
-            "train_loss":         train_loss,
-            "val_loss":           val_loss,
-            "val_qwk":            val_qwk,
-            "mean_entropy":       float(entropy_loop.mean()),
-            "mean_margin":        float(margin_loop.mean()),
+            "epoch":               epoch + 1,
+            "train_loss":          train_loss,
+            "val_loss":            val_loss,
+            "val_qwk":             val_qwk,
+            "mean_entropy":        float(entropy_loop.mean()),
+            "mean_margin":         float(margin_loop.mean()),
             "mean_mc_uncertainty": float(mc_unc_loop.mean()),
-            "uncertain_fraction": uncertain_frac,
-            "learning_rate":      optimizer.param_groups[0]["lr"],
-            "confusion_matrix":   wandb.plot.confusion_matrix(
+            "uncertain_fraction":  uncertain_frac,
+            "learning_rate":       optimizer.param_groups[0]["lr"],
+            "confusion_matrix":    wandb.plot.confusion_matrix(
                 preds=val_preds,
                 y_true=val_labels,
                 class_names=["0", "1", "2", "3", "4"]
             ),
         })
 
-    print("\nTraining complete.")
+    logger.info("Training loop complete.")
 
     # ------------------------------------------------------------------
     # 5a.  Post-training full MC dropout (T=30)
     # ------------------------------------------------------------------
-    print(f"\nRunning MC Dropout over full val set (T={config['mc_dropout_passes']})...")
+    logger.info(f"Post-training MC Dropout | T={config['mc_dropout_passes']}")
     all_mean_probs, all_uncertainties, all_labels_arr, all_logits = mc_evaluate_full(
         model, val_loader, device, T=config["mc_dropout_passes"]
     )
 
     # ------------------------------------------------------------------
-    # 5b.  Temperature scaling FIRST — no pre-calibration reporting
+    # 5b.  Temperature scaling — FIRST, before any reporting
     # ------------------------------------------------------------------
-    print("\nApplying temperature calibration...")
+    logger.info("Applying temperature calibration...")
     optimal_T        = find_temperature(all_logits, all_labels_arr)
     calibrated_probs = apply_temperature(all_logits, optimal_T)
     final_preds      = calibrated_probs.argmax(axis=1)
@@ -198,7 +219,7 @@ def train_model(dataset_name: str, config: dict) -> float:
         calibrated_probs, all_uncertainties
     )
 
-    print("\nTriage Summary — post-calibration (first 20 samples):")
+    logger.info("Triage Summary — post-calibration (first 20 samples):")
     for i in range(min(20, len(final_preds))):
         pred = final_preds[i]
         true = all_labels_arr[i]
@@ -208,10 +229,10 @@ def train_model(dataset_name: str, config: dict) -> float:
             flag = "HIGH SEVERITY - urgent review"
         else:
             flag = "ROUTINE"
-        print(
-            f"Sample {i:3d} | True: {true} | Pred: {pred} "
-            f"| Entropy: {cal_entropy[i]:.3f} | Margin: {cal_margin[i]:.3f} "
-            f"| MC std: {cal_mc_unc[i]:.3f} | {flag}"
+        logger.info(
+            f"  Sample {i:3d} | True:{true} Pred:{pred} "
+            f"| H={cal_entropy[i]:.3f} M={cal_margin[i]:.3f} "
+            f"MC={cal_mc_unc[i]:.3f} | {flag}"
         )
 
     cal_uncertain_mask = (
@@ -219,50 +240,50 @@ def train_model(dataset_name: str, config: dict) -> float:
     )
     correct_mask = (final_preds == all_labels_arr)
 
-    print(f"\nUncertain fraction (calibrated): {cal_uncertain_mask.mean():.3f}")
-    print(f"Calibrated Mean entropy        : {cal_entropy.mean():.4f}")
-    print(f"Calibrated Mean margin         : {cal_margin.mean():.4f}")
-    print(f"Calibrated Mean MC std         : {cal_mc_unc.mean():.4f}")
-    print("\n--- Four Quadrant Uncertainty Breakdown ---")
-    print("Certain + Wrong (dangerous):", (~cal_uncertain_mask & ~correct_mask).sum())
-    print("Certain + Right (ideal)     :", (~cal_uncertain_mask & correct_mask).sum())
-    print("Uncertain + Wrong (caught)  :", ( cal_uncertain_mask & ~correct_mask).sum())
-    print("Uncertain + Right (over-ref):", ( cal_uncertain_mask &  correct_mask).sum())
+    logger.info(f"Uncertain fraction (calibrated): {cal_uncertain_mask.mean():.3f}")
+    logger.info(f"Calibrated Mean entropy        : {cal_entropy.mean():.4f}")
+    logger.info(f"Calibrated Mean margin         : {cal_margin.mean():.4f}")
+    logger.info(f"Calibrated Mean MC std         : {cal_mc_unc.mean():.4f}")
+    logger.info("--- Four Quadrant Uncertainty Breakdown ---")
+    logger.info(f"  Certain + Wrong (dangerous): {(~cal_uncertain_mask & ~correct_mask).sum()}")
+    logger.info(f"  Certain + Right (ideal)     : {(~cal_uncertain_mask & correct_mask).sum()}")
+    logger.info(f"  Uncertain + Wrong (caught)  : {( cal_uncertain_mask & ~correct_mask).sum()}")
+    logger.info(f"  Uncertain + Right (over-ref): {( cal_uncertain_mask &  correct_mask).sum()}")
 
     # ------------------------------------------------------------------
     # 5d.  Calibration plot (post-scaling only)
     # ------------------------------------------------------------------
     calib_path = config.get("calib_plot_train_path", "artifacts/calibration_train.png")
-    print("\nGenerating calibration plot (post-scaling)...")
     per_class_calibration(calibrated_probs, all_labels_arr, save_path=calib_path)
 
     final_qwk = cohen_kappa_score(all_labels_arr, final_preds, weights="quadratic")
+    logger.info(f"Final calibrated val QWK: {final_qwk:.4f}")
 
     wandb.log({
-        "optimal_T":               float(optimal_T),
-        "final_val_qwk":           float(final_qwk),
-        "final_mean_entropy":      float(cal_entropy.mean()),
-        "final_mean_margin":       float(cal_margin.mean()),
+        "optimal_T":                float(optimal_T),
+        "final_val_qwk":            float(final_qwk),
+        "final_mean_entropy":       float(cal_entropy.mean()),
+        "final_mean_margin":        float(cal_margin.mean()),
         "final_mean_mc_uncertainty": float(cal_mc_unc.mean()),
         "final_uncertain_fraction": float(cal_uncertain_mask.mean()),
-        "quadrant_certain_wrong":  int((~cal_uncertain_mask & ~correct_mask).sum()),
-        "quadrant_certain_right":  int((~cal_uncertain_mask &  correct_mask).sum()),
+        "quadrant_certain_wrong":   int((~cal_uncertain_mask & ~correct_mask).sum()),
+        "quadrant_certain_right":   int((~cal_uncertain_mask &  correct_mask).sum()),
         "quadrant_uncertain_wrong": int(( cal_uncertain_mask & ~correct_mask).sum()),
         "quadrant_uncertain_right": int(( cal_uncertain_mask &  correct_mask).sum()),
-        "calibration_plot":        wandb.Image(calib_path),
+        "calibration_plot":         wandb.Image(calib_path),
     })
 
     # ------------------------------------------------------------------
-    # 6.  Save model + optimal_T  (training only — never in test_model)
+    # 6.  Save model + optimal_T (training only — never in test_model)
     # ------------------------------------------------------------------
     model_path = config.get("model_save_path",     "artifacts/aptos_efficientnet.pth")
     T_path     = config.get("optimal_T_save_path", "artifacts/optimal_T.npy")
 
     torch.save(model.state_dict(), model_path)
     np.save(T_path, np.array(optimal_T))
-    print(f"\nModel saved     → {model_path}")
-    print(f"Optimal T saved → {T_path}  (T = {optimal_T:.4f})")
+    logger.info(f"Model saved     → {model_path}")
+    logger.info(f"Optimal T saved → {T_path}  (T={optimal_T:.4f})")
 
     wandb.finish()
-    print("\nTraining run complete.")
+    logger.info("train_model() complete.")
     return optimal_T

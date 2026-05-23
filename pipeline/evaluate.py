@@ -1,32 +1,37 @@
 # pipeline/evaluate.py
 # ============================================================
 # Inference and uncertainty measurement:
-#   - evaluate                  : standard val loop (loss + QWK + confusion matrix)
-#   - mc_evaluate_full          : MC Dropout forward passes → probs + logits
+#   - evaluate                   : standard val loop (loss + QWK + confusion matrix)
+#   - mc_evaluate_full           : MC Dropout forward passes → probs + logits
 #   - compute_uncertainty_signals: entropy, margin, MC std from MC output
 # ============================================================
+
+import logging
 
 import numpy as np
 import torch
 import torch.nn as nn
 from sklearn.metrics import cohen_kappa_score, confusion_matrix
 
+logger = logging.getLogger(__name__)
+
 
 def evaluate(model, loader, criterion, device):
     """
-    Standard validation loop.
+    Standard validation loop (no dropout active).
 
     Returns
     -------
-    epoch_loss  : float
-    qwk         : float   (quadratic weighted kappa)
-    matrix      : ndarray (confusion matrix)
-    all_preds   : list[int]
-    all_labels  : list[int]
+    epoch_loss : float
+    qwk        : float   (quadratic weighted kappa)
+    matrix     : ndarray (confusion matrix)
+    all_preds  : list[int]
+    all_labels : list[int]
     """
+    logger.debug("evaluate() | starting standard validation pass")
     model.eval()
-    all_preds  = []
-    all_labels = []
+    all_preds    = []
+    all_labels   = []
     running_loss = 0.0
 
     with torch.no_grad():
@@ -43,10 +48,11 @@ def evaluate(model, loader, criterion, device):
             all_labels.extend(labels.cpu().numpy())
 
     epoch_loss = running_loss / len(loader)
-    qwk    = cohen_kappa_score(all_labels, all_preds, weights="quadratic")
-    matrix = confusion_matrix(all_labels, all_preds)
+    qwk        = cohen_kappa_score(all_labels, all_preds, weights="quadratic")
+    matrix     = confusion_matrix(all_labels, all_preds)
 
-    print(f"Val Loss: {epoch_loss:.4f} | Val QWK: {qwk:.4f}")
+    logger.info(f"evaluate() | loss={epoch_loss:.4f} | QWK={qwk:.4f}")
+    logger.debug(f"evaluate() | confusion matrix:\n{matrix}")
     return epoch_loss, qwk, matrix, all_preds, all_labels
 
 
@@ -65,6 +71,8 @@ def mc_evaluate_full(model, loader, device, T: int = 30):
     all_labels        : ndarray [N]
     all_logits        : ndarray [N, C] (averaged raw logits across T passes)
     """
+    logger.info(f"mc_evaluate_full() | T={T} passes | starting...")
+
     all_mean_probs    = []
     all_uncertainties = []
     all_labels        = []
@@ -75,8 +83,9 @@ def mc_evaluate_full(model, loader, device, T: int = 30):
         if isinstance(module, nn.Dropout):
             module.train()   # keep dropout active during inference
 
+    n_batches = len(loader)
     with torch.no_grad():
-        for images, labels in loader:
+        for batch_idx, (images, labels) in enumerate(loader):
             images = images.to(device)
 
             passes       = []
@@ -91,20 +100,29 @@ def mc_evaluate_full(model, loader, device, T: int = 30):
             passes       = np.array(passes)        # [T, batch, C]
             logit_passes = np.array(logit_passes)  # [T, batch, C]
 
-            mean_probs   = passes.mean(axis=0)
-            mean_logits  = logit_passes.mean(axis=0)
-            uncertainty  = passes.std(axis=0).mean(axis=1)
+            mean_probs  = passes.mean(axis=0)
+            mean_logits = logit_passes.mean(axis=0)
+            uncertainty = passes.std(axis=0).mean(axis=1)
 
             all_mean_probs.append(mean_probs)
             all_uncertainties.append(uncertainty)
             all_labels.extend(labels.numpy())
             all_logits.append(mean_logits)
 
+            if (batch_idx + 1) % max(1, n_batches // 5) == 0:
+                logger.debug(
+                    f"mc_evaluate_full() | batch {batch_idx + 1}/{n_batches} done"
+                )
+
     all_mean_probs    = np.vstack(all_mean_probs)
     all_uncertainties = np.concatenate(all_uncertainties)
     all_labels        = np.array(all_labels)
     all_logits        = np.vstack(all_logits)   # [N, C]
 
+    logger.info(
+        f"mc_evaluate_full() | done | N={len(all_labels)} samples "
+        f"| mean std={all_uncertainties.mean():.4f}"
+    )
     return all_mean_probs, all_uncertainties, all_labels, all_logits
 
 
@@ -127,9 +145,13 @@ def compute_uncertainty_signals(mean_probs: np.ndarray,
     eps     = 1e-8
     entropy = -np.sum(mean_probs * np.log(mean_probs + eps), axis=1)
 
-    sorted_probs  = np.sort(mean_probs, axis=1)[:, ::-1]
-    margin        = sorted_probs[:, 0] - sorted_probs[:, 1]
+    sorted_probs   = np.sort(mean_probs, axis=1)[:, ::-1]
+    margin         = sorted_probs[:, 0] - sorted_probs[:, 1]
+    mc_uncertainty = uncertainties
 
-    mc_uncertainty = uncertainties  # already per-sample mean std
-
+    logger.debug(
+        f"compute_uncertainty_signals() | "
+        f"entropy mean={entropy.mean():.4f} | margin mean={margin.mean():.4f} "
+        f"| MC std mean={mc_uncertainty.mean():.4f}"
+    )
     return entropy, margin, mc_uncertainty
