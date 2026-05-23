@@ -22,7 +22,7 @@ from utils import DATASET_REGISTRY  # noqa: E402
 # Logging setup — call once at the start of run.py (or any entry point)
 # ----------------------------------------------------------------
 
-def setup_logging(log_dir: str = "artifacts", level: int = logging.INFO) -> None:
+def setup_logging(log_dir: str = "artifacts/logs", level: int = logging.INFO) -> None:
     """
     Configure the root logger with:
       - A StreamHandler that prints to stdout with timestamps
@@ -111,7 +111,30 @@ BASE_CONFIG: dict = {
     "prefetch_factor": 2,
 
     # ---- artifact save paths ----
-    "model_save_path":       "artifacts/aptos_efficientnet.pth",
-    "optimal_T_save_path":   "artifacts/optimal_T.npy",
-    "calib_plot_train_path": "artifacts/calibration_train.png",
+    "model_save_path":       "artifacts/weights/aptos_efficientnet.pth",
+    "optimal_T_save_path":   "artifacts/calibration/optimal_T.npy",
+    "calib_plot_train_path": "artifacts/calibration/plots/calibration_train.png",
 }
+
+
+# ----------------------------------------------------------------
+# Uncertainty Thresholds
+# ----------------------------------------------------------------
+# These thresholds define when predictions should be referred to a specialist
+# due to low confidence or high fragility.
+#
+# 1. Predictive Entropy: Measures the spread of probability distributions.
+#    Since max possible entropy for 5 classes is log(5) ≈ 1.61, a threshold
+#    of 1.0 flags cases where probability is highly distributed/not peaky.
+#
+# 2. Predictive Margin: The gap between the top-1 and top-2 predicted classes.
+#    A margin < 0.3 flags cases where the model is highly indecisive between
+#    two competing classes (e.g. 0.45 vs 0.35 probability).
+#
+# 3. MC Dropout Standard Deviation: Measures prediction fragility under network
+#    perturbations. A standard deviation > 0.05 flags samples whose predictions
+#    are unstable across stochastic forward passes.
+UNCERTAINTY_ENTROPY_THRESHOLD: float = 1.0
+UNCERTAINTY_MARGIN_THRESHOLD: float = 0.3
+UNCERTAINTY_MC_STD_THRESHOLD: float = 0.05
+

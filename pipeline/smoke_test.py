@@ -26,7 +26,12 @@ _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from pipeline.config      import setup_logging
+from pipeline.config      import (
+    setup_logging,
+    UNCERTAINTY_ENTROPY_THRESHOLD,
+    UNCERTAINTY_MARGIN_THRESHOLD,
+    UNCERTAINTY_MC_STD_THRESHOLD,
+)
 from pipeline.dataset     import setting_gpu, set_seed, val_transformer
 from pipeline.model       import EfficientNetMC, get_loss_criterion
 from pipeline.evaluate    import evaluate, mc_evaluate_full, compute_uncertainty_signals
@@ -273,7 +278,11 @@ def test_mini_train_loop(device, tmp_dir):
     optimal_T  = find_temperature(logits, gt_labels)
     cal_probs  = apply_temperature(logits, optimal_T)
     entropy, margin, mc_unc = compute_uncertainty_signals(cal_probs, uncerts)
-    uncertain_mask = (entropy > 1.0) | (margin < 0.3) | (mc_unc > 0.05)
+    uncertain_mask = (
+        (entropy > UNCERTAINTY_ENTROPY_THRESHOLD) |
+        (margin < UNCERTAINTY_MARGIN_THRESHOLD) |
+        (mc_unc > UNCERTAINTY_MC_STD_THRESHOLD)
+    )
 
     logger.info(f"  MC eval done | N={len(gt_labels)} | T={optimal_T:.4f}")
     logger.info(f"  Uncertain fraction: {uncertain_mask.mean():.3f}")
@@ -285,7 +294,7 @@ def test_mini_train_loop(device, tmp_dir):
 # ============================================================
 
 def run_all_tests():
-    setup_logging(log_dir="artifacts")
+    setup_logging(log_dir="artifacts/logs")
     set_seed(SMOKE_CFG["seed"])
 
     logger.info("")

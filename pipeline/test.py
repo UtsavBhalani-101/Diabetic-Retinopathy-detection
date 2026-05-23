@@ -18,12 +18,21 @@ import torch
 import wandb
 from sklearn.metrics import cohen_kappa_score, confusion_matrix
 
-from .config      import DATASET_REGISTRY
+from .config      import (
+    DATASET_REGISTRY,
+    UNCERTAINTY_ENTROPY_THRESHOLD,
+    UNCERTAINTY_MARGIN_THRESHOLD,
+    UNCERTAINTY_MC_STD_THRESHOLD
+)
 from .dataset     import setting_gpu
 from .loaders     import build_loader_for_testing
 from .model       import EfficientNetMC
 from .evaluate    import mc_evaluate_full, compute_uncertainty_signals
-from .calibration import apply_temperature, per_class_calibration
+from .calibration import (
+    apply_temperature,
+    per_class_calibration,
+    triage_sample
+)
 
 logger = logging.getLogger(__name__)
 
@@ -122,18 +131,15 @@ def test_model(dataset_name: str, model_path: str, optimal_T: float,
 
     logger.info(f"[{dataset_name}] Mean entropy      : {entropy.mean():.4f}")
     logger.info(f"[{dataset_name}] Mean margin       : {margin.mean():.4f}")
-    logger.info(f"[{dataset_name}] Uncertain fraction: {(entropy > 1.0).mean():.4f}")
+    logger.info(f"[{dataset_name}] Uncertain fraction: {(entropy > UNCERTAINTY_ENTROPY_THRESHOLD).mean():.4f}")
 
     logger.info(f"[{dataset_name}] Triage Summary (first 20 samples):")
     for i in range(min(20, len(final_preds))):
         pred = final_preds[i]
         true = all_labels_arr[i]
-        if entropy[i] > 1.0 or margin[i] < 0.3 or mc_uncertainty[i] > 0.05:
-            flag = "UNCERTAIN - refer to specialist"
-        elif pred >= 3:
-            flag = "HIGH SEVERITY - urgent review"
-        else:
-            flag = "ROUTINE"
+        flag = triage_sample(
+            pred, entropy[i], margin[i], mc_uncertainty[i]
+        )
         logger.info(
             f"  Sample {i:3d} | True:{true} Pred:{pred} "
             f"| H={entropy[i]:.3f} M={margin[i]:.3f} "
@@ -143,7 +149,11 @@ def test_model(dataset_name: str, model_path: str, optimal_T: float,
     # ------------------------------------------------------------------
     # 7.  Four-quadrant breakdown
     # ------------------------------------------------------------------
-    uncertain_mask = (entropy > 1.0) | (margin < 0.3) | (mc_uncertainty > 0.05)
+    uncertain_mask = (
+        (entropy > UNCERTAINTY_ENTROPY_THRESHOLD) |
+        (margin < UNCERTAINTY_MARGIN_THRESHOLD) |
+        (mc_uncertainty > UNCERTAINTY_MC_STD_THRESHOLD)
+    )
     correct_mask   = (final_preds == all_labels_arr)
     logger.info(f"[{dataset_name}] --- Four Quadrant Uncertainty Breakdown ---")
     logger.info(f"  Certain + Wrong (dangerous): {(~uncertain_mask & ~correct_mask).sum()}")
@@ -154,8 +164,8 @@ def test_model(dataset_name: str, model_path: str, optimal_T: float,
     # ------------------------------------------------------------------
     # 8.  Calibration plot
     # ------------------------------------------------------------------
-    os.makedirs("artifacts", exist_ok=True)
-    calib_path = f"artifacts/calibration_{dataset_name.replace(' ', '_')}.png"
+    os.makedirs("artifacts/calibration/plots", exist_ok=True)
+    calib_path = f"artifacts/calibration/plots/calibration_{dataset_name.replace(' ', '_')}.png"
     per_class_calibration(calibrated_probs, all_labels_arr, save_path=calib_path)
 
     # ------------------------------------------------------------------

@@ -12,6 +12,12 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
+from .config import (
+    UNCERTAINTY_ENTROPY_THRESHOLD,
+    UNCERTAINTY_MARGIN_THRESHOLD,
+    UNCERTAINTY_MC_STD_THRESHOLD,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -147,3 +153,44 @@ def apply_temperature(logits: np.ndarray, T: float) -> np.ndarray:
     calibrated = scipy_softmax(logits / T, axis=1)
     logger.debug(f"apply_temperature() | T={T:.4f} applied to {logits.shape[0]} samples")
     return calibrated
+
+
+def triage_sample(pred: int, entropy: float, margin: float, mc_std: float,
+                  entropy_thresh: float = UNCERTAINTY_ENTROPY_THRESHOLD,
+                  margin_thresh: float = UNCERTAINTY_MARGIN_THRESHOLD,
+                  mc_std_thresh: float = UNCERTAINTY_MC_STD_THRESHOLD) -> str:
+    """
+    Categorize a single sample prediction as UNCERTAIN, HIGH SEVERITY, or ROUTINE.
+
+    Parameters
+    ----------
+    pred : int
+        Predicted class index (0-4).
+    entropy : float
+        Predictive entropy of the softmax probabilities.
+    margin : float
+        Top-2 probability gap.
+    mc_std : float
+        Mean MC standard deviation across passes.
+    entropy_thresh : float
+        Threshold above which a sample is flagged as uncertain.
+    margin_thresh : float
+        Threshold below which a sample is flagged as uncertain.
+    mc_std_thresh : float
+        Threshold above which a sample is flagged as uncertain.
+
+    Returns
+    -------
+    triage_label : str
+        One of:
+        - "UNCERTAIN - refer to specialist"
+        - "HIGH SEVERITY - urgent review"
+        - "ROUTINE"
+    """
+    if entropy > entropy_thresh or margin < margin_thresh or mc_std > mc_std_thresh:
+        return "UNCERTAIN - refer to specialist"
+    elif pred >= 3:
+        return "HIGH SEVERITY - urgent review"
+    else:
+        return "ROUTINE"
+

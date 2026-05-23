@@ -11,12 +11,22 @@ import torch
 import wandb
 from sklearn.metrics import cohen_kappa_score
 
-from .config       import DATASET_REGISTRY
+from .config       import (
+    DATASET_REGISTRY,
+    UNCERTAINTY_ENTROPY_THRESHOLD,
+    UNCERTAINTY_MARGIN_THRESHOLD,
+    UNCERTAINTY_MC_STD_THRESHOLD
+)
 from .dataset      import setting_gpu, set_seed
 from .loaders      import build_loaders_for_training
 from .model        import EfficientNetMC, get_loss_criterion
 from .evaluate     import evaluate, mc_evaluate_full, compute_uncertainty_signals
-from .calibration  import find_temperature, apply_temperature, per_class_calibration
+from .calibration  import (
+    find_temperature,
+    apply_temperature,
+    per_class_calibration,
+    triage_sample
+)
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +130,8 @@ def train_model(dataset_name: str, config: dict) -> float:
     # 4.  Epoch loop
     # ------------------------------------------------------------------
     logger.info(f"Training loop start | epochs={config['epochs']}")
-    os.makedirs("artifacts", exist_ok=True)
+    os.makedirs("artifacts/weights", exist_ok=True)
+    os.makedirs("artifacts/calibration/plots", exist_ok=True)
 
     for epoch in range(config["epochs"]):
         logger.info(f"--- Epoch {epoch + 1}/{config['epochs']} ---")
@@ -169,7 +180,11 @@ def train_model(dataset_name: str, config: dict) -> float:
             mean_prob_loop, uncertainty_loop
         )
         uncertain_frac = float(
-            ((entropy_loop > 1.0) | (margin_loop < 0.3) | (mc_unc_loop > 0.05)).mean()
+            (
+                (entropy_loop > UNCERTAINTY_ENTROPY_THRESHOLD) |
+                (margin_loop < UNCERTAINTY_MARGIN_THRESHOLD) |
+                (mc_unc_loop > UNCERTAINTY_MC_STD_THRESHOLD)
+            ).mean()
         )
         logger.info(
             f"Epoch {epoch + 1} | MC uncertainty | "
@@ -223,12 +238,9 @@ def train_model(dataset_name: str, config: dict) -> float:
     for i in range(min(20, len(final_preds))):
         pred = final_preds[i]
         true = all_labels_arr[i]
-        if cal_entropy[i] > 1.0 or cal_margin[i] < 0.3 or cal_mc_unc[i] > 0.05:
-            flag = "UNCERTAIN - refer to specialist"
-        elif pred >= 3:
-            flag = "HIGH SEVERITY - urgent review"
-        else:
-            flag = "ROUTINE"
+        flag = triage_sample(
+            pred, cal_entropy[i], cal_margin[i], cal_mc_unc[i]
+        )
         logger.info(
             f"  Sample {i:3d} | True:{true} Pred:{pred} "
             f"| H={cal_entropy[i]:.3f} M={cal_margin[i]:.3f} "
@@ -236,7 +248,9 @@ def train_model(dataset_name: str, config: dict) -> float:
         )
 
     cal_uncertain_mask = (
-        (cal_entropy > 1.0) | (cal_margin < 0.3) | (cal_mc_unc > 0.05)
+        (cal_entropy > UNCERTAINTY_ENTROPY_THRESHOLD) |
+        (cal_margin < UNCERTAINTY_MARGIN_THRESHOLD) |
+        (cal_mc_unc > UNCERTAINTY_MC_STD_THRESHOLD)
     )
     correct_mask = (final_preds == all_labels_arr)
 
@@ -253,7 +267,7 @@ def train_model(dataset_name: str, config: dict) -> float:
     # ------------------------------------------------------------------
     # 5d.  Calibration plot (post-scaling only)
     # ------------------------------------------------------------------
-    calib_path = config.get("calib_plot_train_path", "artifacts/calibration_train.png")
+    calib_path = config.get("calib_plot_train_path", "artifacts/calibration/plots/calibration_train.png")
     per_class_calibration(calibrated_probs, all_labels_arr, save_path=calib_path)
 
     final_qwk = cohen_kappa_score(all_labels_arr, final_preds, weights="quadratic")
@@ -276,8 +290,8 @@ def train_model(dataset_name: str, config: dict) -> float:
     # ------------------------------------------------------------------
     # 6.  Save model + optimal_T (training only — never in test_model)
     # ------------------------------------------------------------------
-    model_path = config.get("model_save_path",     "artifacts/aptos_efficientnet.pth")
-    T_path     = config.get("optimal_T_save_path", "artifacts/optimal_T.npy")
+    model_path = config.get("model_save_path",     "artifacts/weights/aptos_efficientnet.pth")
+    T_path     = config.get("optimal_T_save_path", "artifacts/calibration/optimal_T.npy")
 
     torch.save(model.state_dict(), model_path)
     np.save(T_path, np.array(optimal_T))
