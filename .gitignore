@@ -12,4 +12,4 @@ experiments/transferrable.md
 datasets/
 utils.py
 how to run.md
-artifacts/
+artifacts/logs
