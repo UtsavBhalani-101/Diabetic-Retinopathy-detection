@@ -38,3 +38,18 @@
 - per-class correction is not applied because would require vector scaling (5 parameters, one per class) or matrix scaling (25 parameters). With only 733 validation samples, fitting 5+ calibration parameters risks overfitting the calibration correction itself
 - the tradeoff is explicit: global T can't fix Class 2's 0.0768 ECE without also shifting Class 0's already-good 0.0222. But one robust parameter on 733 samples is more reliable than five noisy ones
 
+8. Why use Mahalanobis distance for OOD detection ?
+- after zero-shot testing showed performance degradation across all external datasets, the question was: can we quantify _how far_ each dataset is from APTOS in feature space ?
+- uncertainty metrics (entropy, margin, MC std) showed inconsistent behavior — IDRiD triggered high uncertainty, Messidor didn't, despite Messidor performing worse
+- Mahalanobis distance measures geometric distance from the training cluster in the 1280-d EfficientNet feature space, accounting for feature correlations via the covariance matrix
+- unlike Euclidean distance, Mahalanobis normalizes by the shape of the training distribution — a shift along a high-variance direction is penalized less than a shift along a low-variance direction
+- the APTOS validation set baseline (avg distance 48.17) is required as a reference — without it, OOD distances are numbers without meaning
+
+9. Why is raw Mahalanobis distance insufficient as an OOD detector ?
+- the key finding from EXP_011: distance does not predict performance. IDRiD has the highest avg distance (103.27) but the best QWK (0.62). Messidor has the lowest avg distance (~92.8) but the worst QWK (0.37-0.49)
+- reason: the 1280-d feature space entangles two types of features — DR-invariant (vessel density, hemorrhage patterns) and dataset-specific (scanner artifacts, brightness profiles)
+- raw distance measures shift across all dimensions equally. It can't distinguish "far because the scanner looks different" from "far because the DR features are corrupted"
+- IDRiD is far in scanner-artifact dimensions but DR-invariant features survived → classification works despite high distance
+- Messidor is closer overall but the shift specifically targets DR-relevant dimensions → classification breaks despite lower distance
+- this is directional feature corruption: the magnitude of shift matters less than its direction relative to the model's decision boundaries
+- implication: reliable OOD detection requires either (a) per-class distance to capture directional information, or (b) domain adaptation (DANN) to disentangle invariant from dataset-specific features before computing distance
