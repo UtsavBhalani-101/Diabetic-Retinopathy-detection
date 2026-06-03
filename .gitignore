@@ -10,6 +10,5 @@ train.csv
 testing_sample.py
 experiments/transferrable.md
 datasets/
-utils.py
 how to run.md
 artifacts/logs

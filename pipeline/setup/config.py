@@ -4,6 +4,7 @@
 #   - setup_logging()   : configures console + file handlers once
 #   - BASE_CONFIG       : all hyperparameters consumed by train/test
 #   - DATASET_REGISTRY  : re-exported from root utils.py
+#   - Setting device (GPU/CPU) and reproducibility
 # ============================================================
 
 import sys
@@ -14,12 +15,8 @@ import numpy as np
 import torch 
 import random
 
-# Make the project root importable when this package is run from any CWD
-_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)
+logger = logging.getLogger(__name__)
 
-from utils import DATASET_REGISTRY  # noqa: E402
 
 
 # ----------------------------------------------------------------
@@ -142,6 +139,12 @@ BASE_CONFIG: dict = {
 UNCERTAINTY_ENTROPY_THRESHOLD: float = 1.0
 UNCERTAINTY_MARGIN_THRESHOLD: float = 0.3
 UNCERTAINTY_MC_STD_THRESHOLD: float = 0.05
+
+# ----------------------------------------------------------------
+# Setting GPU and seed for reproducibility
+# ----------------------------------------------------------------
+
+
 
 # ^ ------------------------------- setting gpu ----------------------------------
 
