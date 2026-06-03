@@ -11,14 +11,13 @@ import pandas as pd
 from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 
-from .config  import DATASET_REGISTRY
+from pipeline.setup.utils import DATASET_REGISTRY
+from pipeline.setup.config import seed_worker, g
+
 from .dataset import (
     RetinopathyDataset,
-    RetinopathyDatasetFromDF,
     train_transformer,
     val_transformer,
-    seed_worker,
-    g,
 )
 
 logger = logging.getLogger(__name__)
@@ -52,20 +51,20 @@ def build_loaders_for_training(dataset_name: str, config: dict):
         f"[{dataset_name}] Stratified split → train: {len(train_df)} | val: {len(val_df)}"
     )
 
-    train_dataset = RetinopathyDatasetFromDF(
-        df=train_df,
-        image_path=reg["image_path"],
-        image_col=reg["image_col"],
-        diagnosis_col=diag_col,
-        transform=train_transformer,
+    train_dataset = RetinopathyDataset(
+        dataframe=train_df,
+        img_path=reg["image_path"],
+        img_col=reg["image_col"],
+        label_col=diag_col,
+        transforms=train_transformer,
         extension=reg["extension"]
     )
-    val_dataset = RetinopathyDatasetFromDF(
-        df=val_df,
-        image_path=reg["image_path"],
-        image_col=reg["image_col"],
-        diagnosis_col=diag_col,
-        transform=val_transformer,
+    val_dataset = RetinopathyDataset(
+        dataframe=val_df,
+        img_path=reg["image_path"],
+        img_col=reg["image_col"],
+        label_col=diag_col,
+        transforms=val_transformer,
         extension=reg["extension"]
     )
 
@@ -119,10 +118,10 @@ def build_loader_for_testing(dataset_name: str, config: dict,
         logger.info(f"[{dataset_name}] Using full training CSV for evaluation (zero-shot)")
 
     dataset = RetinopathyDataset(
-        input_path=image_path,
+        img_path=image_path,
         target_path=target_path,
-        image_col=reg["image_col"],
-        diagnosis_col=reg["diagnosis_col"],
+        img_col=reg["image_col"],
+        label_col=reg["diagnosis_col"],
         transforms=val_transformer,
         extension=reg["extension"]
     )

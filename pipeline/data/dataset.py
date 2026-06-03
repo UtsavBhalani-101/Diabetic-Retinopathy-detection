@@ -1,11 +1,5 @@
 # pipeline/dataset.py
 # ============================================================
-# Everything related to loading images:
-#   - GPU setup + reproducibility helpers
-#   - train / val transforms
-#   - RetinopathyDataset      (CSV-backed, used for test-time)
-#   - RetinopathyDatasetFromDF (DF-backed,  used for train/val split)
-# ============================================================
 
 import logging
 import os
@@ -45,68 +39,49 @@ logger.debug("Train and val transforms defined")
 # ^ -------------------------- dataset classes --------------------------
 
 class RetinopathyDataset(Dataset):
-    """
-    CSV-backed dataset.
-    Used for external / test datasets where the full CSV is consumed as-is.
-    """
-
-    def __init__(self, input_path, target_path, image_col, diagnosis_col,
-                 transforms, extension, num_samples=None):
-        self.img_path      = input_path
-        self.extension     = extension
-        self.image_col     = image_col
-        self.diagnosis_col = diagnosis_col
-        self.df = pd.read_csv(target_path).reset_index(drop=True)
-        if num_samples is not None:
-            self.df = self.df.sample(n=num_samples, random_state=42).reset_index(drop=True)
-            logger.debug(f"RetinopathyDataset: sampled {num_samples} rows from CSV")
-        self.transform = transforms
-        logger.info(
-            f"RetinopathyDataset | path={target_path} | rows={len(self.df)} | ext={extension}"
-        )
-
-    def __len__(self):
-        return len(self.df)
-
-    def __getitem__(self, idx):
-        row    = self.df.iloc[idx]
-        img_id = row[self.image_col]
-        label  = row[self.diagnosis_col]
-        img_path = os.path.join(self.img_path, f"{img_id}.{self.extension}")
-        image  = Image.open(img_path).convert("RGB")
-        if self.transform:
-            image = self.transform(image)
-        return image, label
+    def __init__(self, 
+                 img_path, 
+                 img_col, 
+                 label_col, 
+                 transforms, 
+                 extension, 
+                 num_samples=None, 
+                 dataframe=None, 
+                 target_path=None):
 
 
-class RetinopathyDatasetFromDF(Dataset):
-    """
-    DataFrame-backed dataset.
-    Used for APTOS train/val splits: the caller does the stratified split
-    and passes each sub-DataFrame here, avoiding the need to write new CSVs.
-    """
+        if (target_path is None) == (dataframe is None):
+            raise ValueError("Provide exactly one, either target_path OR dataframe")
 
-    def __init__(self, df, image_path, image_col, diagnosis_col,
-                 transform, extension):
-        self.df            = df.reset_index(drop=True)
-        self.img_path      = image_path
-        self.image_col     = image_col
-        self.diagnosis_col = diagnosis_col
-        self.transform     = transform
-        self.extension     = extension
+        self.img_path = img_path
+        self.img_col = img_col
+        self.label_col = label_col
+        self.extension = extension
+        self.transforms = transforms
+        
+        if target_path is None:
+            self.df = dataframe.copy()
+        else:
+            self.df = pd.read_csv(target_path, usecols=[self.img_col, self.label_col])
+            
+        if num_samples:
+            self.df = self.df.head(num_samples)
+        
         logger.info(
             f"RetinopathyDatasetFromDF | rows={len(self.df)} | ext={extension}"
-        )
+        )        
 
     def __len__(self):
         return len(self.df)
 
     def __getitem__(self, idx):
-        row    = self.df.iloc[idx]
-        img_id = row[self.image_col]
-        label  = int(row[self.diagnosis_col])
-        img_file = os.path.join(self.img_path, f"{img_id}.{self.extension}")
-        image  = Image.open(img_file).convert("RGB")
-        if self.transform:
-            image = self.transform(image)
+        
+        row = self.df.iloc[idx]
+        image_id = row[self.img_col]
+        label = row[self.label_col]
+        image_path = os.path.join(self.img_path, f"{image_id}.{self.extension}")
+        image = Image.open(image_path).convert("RGB")
+        image = self.transforms(image)
+        
         return image, label
+
