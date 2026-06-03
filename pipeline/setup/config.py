@@ -10,6 +10,9 @@ import sys
 import os
 import logging
 import datetime
+import numpy as np
+import torch 
+import random
 
 # Make the project root importable when this package is run from any CWD
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -140,3 +143,40 @@ UNCERTAINTY_ENTROPY_THRESHOLD: float = 1.0
 UNCERTAINTY_MARGIN_THRESHOLD: float = 0.3
 UNCERTAINTY_MC_STD_THRESHOLD: float = 0.05
 
+# ^ ------------------------------- setting gpu ----------------------------------
+
+def setting_gpu() -> torch.device:
+    """Detect GPU, log name, and return a torch.device."""
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    logger.info(f"Device selected: {device}")
+    if torch.cuda.is_available():
+        logger.info(f"GPU: {torch.cuda.get_device_name(0)}")
+    else:
+        logger.warning("No GPU found — running on CPU (will be slow for training)")
+    return device
+
+
+# ^ ------------------------------- reproducibility ----------------------------------
+
+def set_seed(seed: int = 42) -> None:
+    """Fix all random seeds for full reproducibility."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    logger.debug(f"Random seed fixed: {seed}")
+
+
+# Worker-level seed fn — passed as worker_init_fn to DataLoader
+def seed_worker(worker_id: int) -> None:  # noqa: ARG001
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+
+
+# Shared Generator for DataLoader reproducibility
+g = torch.Generator()
+g.manual_seed(42)
