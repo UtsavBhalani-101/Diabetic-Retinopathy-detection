@@ -73,4 +73,7 @@
 - IDRiD's shift is large but in scanner-artifact dimensions → class separations survive → model is uncertain (0.55 uncertain fraction) but still classifies correctly
 - Messidor's shift is smaller overall but specifically targets DR-relevant dimensions → Proliferative DR features land in the healthy retina region → model is confident (0.21 uncertain fraction) and wrong (30-36% Certain+Wrong)
 - this is the same pattern from the zero-shot testing (TEST_001, TEST_002) but now with a geometric explanation: **the type/direction of distribution shift matters more than its magnitude**
-- connects directly to DANN: domain adaptation would penalize the encoder for learning dataset-specific features, leaving only DR-invariant features. Mahalanobis distance computed on DANN features would measure shift in a DR-relevant subspace, making the distance → performance correlation meaningful
+- connects directly to DANN: domain adaptation would penalize the encoder for learning dataset-specific features, leaving only DR-invariant features. Mahalanobis distance computed on DANN features would measure shift in a DR-relevant subspace, making the distance → performance correlation meaningful
+- another hypothesis is that the model is learning invariant features and dataset specific features, the distance in dataset specific features is high causing the model to be uncertain but the model still classifies correctly because it has learned the invariant features so the distance and performance are not correlated
+- but in Messidor, the distance in dataset specific features is low
+

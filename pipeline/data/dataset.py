@@ -60,15 +60,16 @@ class RetinopathyDataset(Dataset):
         self.transforms = transforms
         
         if target_path is None:
-            self.df = dataframe.copy()
+            self.df = dataframe.copy().reset_index(drop=True)
         else:
-            self.df = pd.read_csv(target_path, usecols=[self.img_col, self.label_col])
-            
+            self.df = pd.read_csv(target_path, usecols=[self.img_col, self.label_col]).reset_index(drop=True)
+        
         if num_samples:
             self.df = self.df.head(num_samples)
-        
+            logger.debug(f"RetinopathyDataset: sampled {num_samples} rows from CSV")
+
         logger.info(
-            f"RetinopathyDatasetFromDF | rows={len(self.df)} | ext={extension}"
+            f"RetinopathyDataset | rows={len(self.df)} | ext={extension}"
         )        
 
     def __len__(self):
