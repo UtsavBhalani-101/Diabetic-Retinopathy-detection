@@ -12,17 +12,17 @@ import wandb
 import datetime
 from sklearn.metrics import cohen_kappa_score
 
-from .config       import (
-    DATASET_REGISTRY,
+from pipeline.setup.utils import DATASET_REGISTRY
+from pipeline.setup.config import (
     UNCERTAINTY_ENTROPY_THRESHOLD,
     UNCERTAINTY_MARGIN_THRESHOLD,
     UNCERTAINTY_MC_STD_THRESHOLD
 )
-from .dataset      import setting_gpu, set_seed
-from .loaders      import build_loaders_for_training
-from .model        import EfficientNetMC, get_loss_criterion
-from .evaluate     import evaluate, mc_evaluate_full, compute_uncertainty_signals
-from .calibration  import (
+from pipeline.setup.config import setting_gpu, set_seed
+from pipeline.data.loaders import build_loaders_for_training
+from pipeline.training_loop_setup.model import EfficientNetMC, get_loss_criterion
+from pipeline.evaluation.evaluate import evaluate, mc_evaluate_full, compute_uncertainty_signals
+from pipeline.evaluation.calibration import (
     find_temperature,
     apply_temperature,
     per_class_calibration,

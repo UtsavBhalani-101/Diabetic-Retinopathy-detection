@@ -9,9 +9,9 @@
 
 import logging
 
-from .config import BASE_CONFIG, setup_logging
-from .train  import train_model
-from .test   import test_model
+from pipeline.setup.config import BASE_CONFIG, setup_logging
+from pipeline.orchestrators.train import train_model
+from pipeline.orchestrators.test import test_model
 
 logger = logging.getLogger(__name__)
 

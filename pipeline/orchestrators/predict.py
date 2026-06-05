@@ -16,19 +16,15 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-# Make the project root importable when this package is run from any CWD
-_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)
 
-from pipeline.config      import (
+from pipeline.setup.config import (
     UNCERTAINTY_ENTROPY_THRESHOLD,
     UNCERTAINTY_MARGIN_THRESHOLD,
     UNCERTAINTY_MC_STD_THRESHOLD
 )
-from pipeline.dataset     import val_transformer, setting_gpu
-from pipeline.model       import EfficientNetMC
-from pipeline.calibration import apply_temperature, triage_sample
+from pipeline.data.dataset import val_transformer
+from pipeline.training_loop_setup.model import EfficientNetMC
+from pipeline.evaluation.calibration import apply_temperature, triage_sample
 
 # Configure logging to stderr so stdout contains only clean structured JSON
 logger = logging.getLogger("pipeline.predict")

@@ -19,17 +19,17 @@ import wandb
 import datetime
 from sklearn.metrics import cohen_kappa_score, confusion_matrix
 
-from .config      import (
-    DATASET_REGISTRY,
+from pipeline.setup.utils import DATASET_REGISTRY
+from pipeline.setup.config import (
     UNCERTAINTY_ENTROPY_THRESHOLD,
     UNCERTAINTY_MARGIN_THRESHOLD,
     UNCERTAINTY_MC_STD_THRESHOLD
 )
-from .dataset     import setting_gpu
-from .loaders     import build_loader_for_testing
-from .model       import EfficientNetMC
-from .evaluate    import mc_evaluate_full, compute_uncertainty_signals
-from .calibration import (
+from pipeline.setup.config import setting_gpu
+from pipeline.data.loaders import build_loader_for_testing
+from pipeline.training_loop_setup.model import EfficientNetMC
+from pipeline.evaluation.evaluate import mc_evaluate_full, compute_uncertainty_signals
+from pipeline.evaluation.calibration import (
     apply_temperature,
     per_class_calibration,
     triage_sample
