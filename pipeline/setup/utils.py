@@ -1,10 +1,10 @@
 DATASET_REGISTRY = {
     "IDRiD": {
-        "image_path": r"/kaggle/input/datasets/antiti/messidor-grp-dataset/IDRiD/IDRiD/B. Disease Grading/1. Original Images/a. Training Set",
-        "target_path": r"/kaggle/input/datasets/antiti/messidor-grp-dataset/IDRiD/IDRiD/B. Disease Grading/2. Groundtruths/a. IDRiD_Disease Grading_Training Labels.csv",
+        "image_path": r"/kaggle/input/datasets/antiti/idrid-testing-dataset/IDRiD/B. Disease Grading/1. Original Images/a. Training Set",
+        "target_path": r"/kaggle/input/datasets/antiti/idrid-testing-dataset/IDRiD/B. Disease Grading/2. Groundtruths/a. IDRiD_Disease Grading_Training Labels.csv",
         # official IDRiD test set (separate from training set)
-        "test_image_path": r"/kaggle/input/datasets/antiti/messidor-grp-dataset/IDRiD/IDRiD/B. Disease Grading/1. Original Images/b. Testing Set",
-        "test_target_path": r"/kaggle/input/datasets/antiti/messidor-grp-dataset/IDRiD/IDRiD/B. Disease Grading/2. Groundtruths/b. IDRiD_Disease Grading_Testing Labels.csv",
+        "test_image_path": r"/kaggle/input/datasets/antiti/idrid-testing-dataset/IDRiD/B. Disease Grading/1. Original Images/b. Testing Set",
+        "test_target_path": r"/kaggle/input/datasets/antiti/idrid-testing-dataset/IDRiD/B. Disease Grading/2. Groundtruths/b. IDRiD_Disease Grading_Testing Labels.csv",
         "image_col": "Image name",
         "diagnosis_col": "Retinopathy grade",
         "extension": "jpg",
@@ -12,8 +12,8 @@ DATASET_REGISTRY = {
         "class_names": ["No DR", "Mild", "Moderate", "Severe", "Proliferative"]
     },
     "DDR-China": {
-        "image_path": r"/kaggle/input/mariaherrerot/ddrdataset/DR_grading/DR_grading",
-        "target_path": r"/kaggle/input/mariaherrerot/ddrdataset/DR_grading.csv",
+        "image_path": r"/kaggle/input/datasets/mariaherrerot/ddrdataset/DR_grading/DR_grading",
+        "target_path": r"/kaggle/input/datasets/mariaherrerot/ddrdataset/DR_grading.csv",
         "image_col": "image_name",
         "diagnosis_col": "diagnosis",
         "extension": "jpg",
@@ -48,8 +48,8 @@ DATASET_REGISTRY = {
         "class_names": ["No DR", "Mild", "Moderate", "Severe", "Proliferative"]
     },
     "EyePACS-Resized": {
-        "image_path": r"/kaggle/input/resized-2015-2019-blindness-detection-images/resized_train_15",
-        "target_path": r"/kaggle/input/resized-2015-2019-blindness-detection-images/labels.csv", 
+        "image_path": r"/kaggle/input/datasets/dreamer07/eyepacs/data/data",
+        "target_path": r"/kaggle/input/datasets/dreamer07/eyepacs/trainLabels.csv/trainLabels.csv", 
         "image_col": "image",
         "diagnosis_col": "level",
         "extension": "jpg",
@@ -57,8 +57,8 @@ DATASET_REGISTRY = {
         "class_names": ["No DR", "Mild", "Moderate", "Severe", "Proliferative"]
     },
     "APTOS_2019": {
-        "image_path": r"/kaggle/input/aptos2019-blindness-detection/train_images",
-        "target_path": r"/kaggle/input/aptos2019-blindness-detection/train.csv",
+        "image_path": r"/kaggle/input/competitions/aptos2019-blindness-detection/train_images",
+        "target_path": r"/kaggle/input/competitions/aptos2019-blindness-detection/train.csv",
         "image_col": "id_code",         # APTOS uses id_code
         "diagnosis_col": "diagnosis",   # APTOS uses diagnosis
         "extension": "png",             # APTOS images are saved natively as .png

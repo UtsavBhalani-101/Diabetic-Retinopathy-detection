@@ -12,7 +12,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
-from .config import (
+from pipeline.setup.config import (
     UNCERTAINTY_ENTROPY_THRESHOLD,
     UNCERTAINTY_MARGIN_THRESHOLD,
     UNCERTAINTY_MC_STD_THRESHOLD,

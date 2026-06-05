@@ -14,7 +14,7 @@ from sklearn.model_selection import train_test_split
 from pipeline.setup.utils import DATASET_REGISTRY
 from pipeline.setup.config import seed_worker, g
 
-from .dataset import (
+from pipeline.data.dataset import (
     RetinopathyDataset,
     train_transformer,
     val_transformer,

@@ -12,16 +12,16 @@ import os
 import logging
 import datetime
 import numpy as np
-import torch 
+import torch
 import random
 
 logger = logging.getLogger(__name__)
 
 
-
 # ----------------------------------------------------------------
 # Logging setup — call once at the start of run.py (or any entry point)
 # ----------------------------------------------------------------
+
 
 def setup_logging(log_dir: str = "artifacts/logs", level: int = logging.INFO) -> None:
     """
@@ -77,44 +77,42 @@ def setup_logging(log_dir: str = "artifacts/logs", level: int = logging.INFO) ->
 BASE_CONFIG: dict = {
     # ---- wandb ----
     "project_name": "aptos-blindness-detection",
-
     # ---- model ----
-    "model":        "efficientnet_b0",
-    "image_size":   (224, 224),
+    "model": "efficientnet_b0",
+    "image_size": (224, 224),
     "dropout_rate": 0.3,
-    "num_classes":  5,
-
+    "num_classes": 5,
     # ---- training ----
-    "epochs":    10,
+    "epochs": 10,
     "optimizer": "adam",
-    "lr":        1e-4,
-    "loss":      "weighted_cross_entropy",
+    "lr": 1e-4,
+    "loss": "weighted_cross_entropy",
     "batch_size": 32,
-    "seed":       42,
-
+    "seed": 42,
     # ---- calibration / uncertainty ----
     "calibration_measure": "ECE",
-    "calibration_fix":     "temp_scaling",
-    "mc_dropout_passes":   30,
-
+    "calibration_fix": "temp_scaling",
+    "mc_dropout_passes": 30,
     # ---- augmentations (logged to wandb; actual transforms live in dataset.py) ----
     "augmentations": [
-        "horizontal_flip", "vertical_flip",
-        "rotation_360", "color_jitter"
+        "horizontal_flip",
+        "vertical_flip",
+        "rotation_360",
+        "color_jitter",
     ],
     "color_jitter": {
-        "brightness": 0.2, "contrast": 0.2,
-        "saturation": 0.1, "hue": 0.05
+        "brightness": 0.2,
+        "contrast": 0.2,
+        "saturation": 0.1,
+        "hue": 0.05,
     },
-
     # ---- dataloader ----
-    "num_workers":    4,
-    "pin_memory":     True,
+    "num_workers": 4,
+    "pin_memory": True,
     "prefetch_factor": 2,
-
     # ---- artifact save paths ----
-    "model_save_path":       "artifacts/weights/aptos_efficientnet.pth",
-    "optimal_T_save_path":   "artifacts/calibration/optimal_T.npy",
+    "model_save_path": "artifacts/weights/aptos_efficientnet.pth",
+    "optimal_T_save_path": "artifacts/calibration/optimal_T.npy",
     "calib_plot_train_path": "artifacts/calibration/plots/calibration_train.png",
 }
 
@@ -145,8 +143,8 @@ UNCERTAINTY_MC_STD_THRESHOLD: float = 0.05
 # ----------------------------------------------------------------
 
 
-
 # ^ ------------------------------- setting gpu ----------------------------------
+
 
 def setting_gpu() -> torch.device:
     """Detect GPU, log name, and return a torch.device."""
@@ -160,6 +158,7 @@ def setting_gpu() -> torch.device:
 
 
 # ^ ------------------------------- reproducibility ----------------------------------
+
 
 def set_seed(seed: int = 42) -> None:
     """Fix all random seeds for full reproducibility."""

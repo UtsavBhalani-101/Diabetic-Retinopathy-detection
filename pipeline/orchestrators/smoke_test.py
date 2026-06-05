@@ -21,21 +21,18 @@ import torch.nn as nn
 import pandas as pd
 from torch.utils.data import Dataset, DataLoader
 
-# ---- make project root importable ----
-_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)
 
-from pipeline.config      import (
+from pipeline.setup.config      import (
     setup_logging,
     UNCERTAINTY_ENTROPY_THRESHOLD,
     UNCERTAINTY_MARGIN_THRESHOLD,
     UNCERTAINTY_MC_STD_THRESHOLD,
+    setting_gpu, set_seed
 )
-from pipeline.dataset     import setting_gpu, set_seed, val_transformer
-from pipeline.model       import EfficientNetMC, get_loss_criterion
-from pipeline.evaluate    import evaluate, mc_evaluate_full, compute_uncertainty_signals
-from pipeline.calibration import find_temperature, apply_temperature, per_class_calibration
+
+from pipeline.training_loop_setup.model import EfficientNetMC, get_loss_criterion
+from pipeline.evaluation.evaluate import evaluate, mc_evaluate_full, compute_uncertainty_signals
+from pipeline.evaluation.calibration import find_temperature, apply_temperature, per_class_calibration
 
 logger = logging.getLogger(__name__)
 
