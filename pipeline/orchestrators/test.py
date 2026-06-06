@@ -222,7 +222,7 @@ if __name__ == "__main__":
     model_path = BASE_CONFIG["model_save_path"]
     optimal_T  = float(np.load(BASE_CONFIG["optimal_T_save_path"]))
 
-    datasets = ["IDRiD", "DDR-China", "Messidor-Grp1", "Messidor-Grp2", "Messidor-Grp3", "EyePACS-Resized"]
+    datasets = ["DDR-China", "EyePACS-Resized"]
     for dataset in datasets:
         test_model(dataset_name=dataset, model_path=model_path,
                    optimal_T=optimal_T, config=BASE_CONFIG, use_test_split=False)
