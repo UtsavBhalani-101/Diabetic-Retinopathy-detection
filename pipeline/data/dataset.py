@@ -80,7 +80,7 @@ class RetinopathyDataset(Dataset):
         row = self.df.iloc[idx]
         image_id = row[self.img_col]
         label = row[self.label_col]
-        image_path = os.path.join(self.img_path, f"{image_id}.{self.extension}")
+        image_path = os.path.join(self.img_path, f"{image_id}{self.extension}")
         image = Image.open(image_path).convert("RGB")
         image = self.transforms(image)
         
