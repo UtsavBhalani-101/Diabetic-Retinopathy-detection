@@ -2,7 +2,7 @@
 
 ## What Was Done
 
-The APTOS model (EfficientNet-B0, WCE + augmentation + MC Dropout) was **retrained from scratch with Ben Graham preprocessing** (radius-based cropping + Gaussian blur subtraction for illumination normalization) applied to the APTOS training set. That retrained model was then tested on three external datasets — IDRiD, Messidor (G1/G2/G3), and DDR — also with Ben Graham applied at test time.
+The APTOS model (EfficientNet-B0, WCE + augmentation + MC Dropout) was **retrained from scratch with Ben Graham preprocessing** (radius-based cropping + Gaussian blur subtraction for illumination normalization) applied to the APTOS training set. That retrained model was then tested on five external datasets — IDRiD, Messidor (G1/G2/G3), DDR, and EyePACS — also with Ben Graham applied at test time.
 
 Preprocessing was **consistent** between training and testing: both APTOS training images and external test images went through the same Ben Graham pipeline. This is critical — applying Ben Graham at test time only (without retraining) produced catastrophic performance collapse, so the model needed to learn features compatible with the BG appearance profile.
 
@@ -23,9 +23,10 @@ Preprocessing was **consistent** between training and testing: both APTOS traini
 | Messidor G2 | 92.7 | 50.5 | **-42.2** | 0.42 | 0.22 | **-0.20** |
 | Messidor G3 | 92.9 | 53.3 | **-39.6** | 0.37 | 0.34 | **-0.03** |
 | DDR | 100.6 | 53.5 | **-47.1** | 0.54 | 0.41 | **-0.13** |
+| EyePACS | 106.6 | 55.2 | **-51.4** | 0.38 | 0.26 | **-0.12** |
 
 > [!IMPORTANT]
-> Distances collapsed to near APTOS baseline across all datasets (~50 vs 48). QWK either held (IDRiD) or dropped (Messidor, DDR). These two facts together are the foundation of the entire analysis.
+> Distances collapsed to near APTOS baseline across all datasets (~50–55 vs 48). QWK either held (IDRiD) or dropped (Messidor, DDR, EyePACS). EyePACS had the largest absolute distance reduction (-51.4) yet the worst post-BG QWK (0.26) — the parent-child relationship doesn't save it. These two facts together are the foundation of the entire analysis.
 
 ### Uncertainty & Safety Metrics
 
@@ -37,13 +38,27 @@ Preprocessing was **consistent** between training and testing: both APTOS traini
 | Messidor G2 | 0.22 | 0.13 | 144 (36%) | 168 (42%) |
 | Messidor G3 | 0.21 | 0.23 | 119 (30%) | 119 (30%) |
 | DDR | 0.30 | 0.18 | 2731 (32%) | 3864 (31%) |
+| EyePACS | 0.21 | 0.14 | 5722 (21%) | 6861 (20%) |
 
 > [!WARNING]
-> IDRiD improved dramatically — uncertainty rose to 0.77 and Certain+Wrong dropped from 23 to 5. But Messidor and DDR got worse — uncertainty dropped and dangerous failures increased. Ben Graham helps the model be honest about IDRiD but makes it more confidently wrong on Messidor and DDR.
+> IDRiD improved dramatically — uncertainty rose to 0.77 and Certain+Wrong dropped from 23 to 5. But Messidor, DDR, and EyePACS all got worse — uncertainty dropped and dangerous failures increased. EyePACS has the highest absolute Certain+Wrong count in the entire evaluation (6861) despite being APTOS's parent dataset. Ben Graham helps the model be honest about IDRiD but makes it more confidently wrong on everything else.
 
 ---
 
 ## What the Confusion Matrices Show
+
+### IDRiD — After Ben Graham
+```
+[[25  8  0  1  0]   ← Class 0: 25/34, some spread to Class 1
+ [ 3  2  0  0  0]   ← Class 1: 2/5, small sample
+ [ 7  5 13  7  0]   ← Class 2: 13/32 correct, errors spread adjacently
+ [ 2  2  1 11  3]   ← Class 3: 11/19 correct, errors spread
+ [ 1  4  1  5  2]]  ← Class 4: 2/13 correct, 5 → Class 3 (adjacent)
+```
+
+**Pattern**: No Class 0 collapse. Errors are spread across adjacent classes — the expected pattern for genuine uncertainty rather than confident collapse. This is the **only dataset where BG improved safety behavior**: uncertain fraction jumped from 0.55 to 0.77, Certain+Wrong dropped from 23 to 5. The model became more honest rather than more collapsed.
+
+**Why IDRiD is unique**: Same Indian patient population as APTOS, similar equipment, identical 0-4 label space. BG normalized the appearance and the underlying DR features were close enough to APTOS that the model correctly recognized what it didn't know rather than defaulting to Class 0.
 
 ### Messidor G1 — After Ben Graham
 ```
@@ -54,24 +69,60 @@ Preprocessing was **consistent** between training and testing: both APTOS traini
  [ 85   0   2  60   2]]  ← Class 4: 2/149 correct, 85 → Class 0, 60 → Class 3
 ```
 
-**Pattern**: Near-total collapse into Class 0. Classes 1 and 2 are completely absorbed. Class 4 partially survives (60 predicted as Class 3 — adjacent, not random) but 85 severe cases are called healthy.
+**Pattern**: Near-total collapse into Class 0. Classes 1 and 2 are completely absorbed. **Unique finding**: Class 4 shows a split behavior — 85 cases collapsed to Class 0 but 60 predicted as Class 3 (adjacent). Roughly 40% of Class 4 cases landed in the right neighborhood (severe end of the scale) while 57% collapsed. This suggests two subpopulations within Messidor's Proliferative DR: cases with distinctive enough lesion morphology to survive, and cases absorbed by the BG appearance profile.
+
+### Messidor G2 — After Ben Graham (Worst Result in Entire Evaluation)
+```
+[[186   0   0   0   0]   ← Class 0: 186/186, total absorption
+ [ 71   0   0   0   0]   ← Class 1: 0/71, total collapse
+ [ 89   0   0   2   0]   ← Class 2: 0/91, near-total collapse
+ [  0   0   0   0   0]   ← Class 3: empty
+ [ 36   0   0  16   0]]  ← Class 4: 0/52 correct, 36 → Class 0, only 16 → Class 3
+```
+
+**Pattern**: The deepest silent failure in the entire analysis. QWK 0.22, uncertain fraction **0.13** — the lowest in the entire evaluation including APTOS itself. The model is maximally confident while being wrong on nearly everything outside Class 0. Not even the partial Class 4 recovery seen in G1 and G3. Class 0 ECE 0.385 is the highest across all datasets — the model is both overconfident and wrong on its dominant prediction. G2 likely has the most extreme equipment difference from APTOS among the three Messidor groups.
+
+### Messidor G3 — After Ben Graham
+```
+[[209   0   0   0   0]   ← Class 0: 209/209, total absorption
+ [ 52   0   0   0   0]   ← Class 1: 0/52, total collapse
+ [ 79   0   0   7   0]   ← Class 2: 0/86, near-total collapse
+ [  0   0   0   0   0]   ← Class 3: empty
+ [ 29   0   1  23   0]]  ← Class 4: 0/53 correct, 29 → Class 0, 23 → Class 3
+```
+
+**Pattern**: Similar to G1 but weaker Class 4 survival — 23 predicted as Class 3 out of 53 total vs 60/149 in G1. **Unique finding**: G3 has the best QWK of the three Messidor groups (0.34 vs 0.32 vs 0.22) and lowest Certain+Wrong (119 vs 147 vs 168) despite similar distances. Inter-hospital variation within Messidor is a real compounding factor on top of the base distribution shift.
 
 ### DDR — After Ben Graham
 ```
 [[6232   16    9    2    7]   ← Class 0: 6232/6266, intact
  [ 611    6    2    1   10]   ← Class 1: 6/630, near-total collapse
- [3695  127  302   65  288]   ← Class 2: 302/4477 correct, 3695 → Class 0
+ [3695  127  302   65  288]   ← Class 2: 302/4477 correct (~7%), 3695 → Class 0
  [  90    7   37   29   73]   ← Class 3: 29/236 correct, spread
  [ 362   28   41   37  445]]  ← Class 4: 445/913 correct (~49%)
 ```
 
-**Pattern**: Class 0 dominates but not as completely as Messidor. Class 4 retains ~49% accuracy — DDR's proliferative DR partially transfers. Class 2 is the primary casualty (3695/4477 → Class 0).
+**Pattern**: **Unique finding**: The bifurcation — Class 4 achieves ~49% accuracy while Class 2 achieves only ~7%. A 7x accuracy gap between the most and least severe non-trivial classes. Class 2 is the primary casualty with 3695/4477 → Class 0, the largest absolute misclassification count of any single class across any dataset. Moderate DR is clinically ambiguous by definition and has the weakest decision boundary. Class 4 survives because Proliferative DR features (neovascularization, large hemorrhages, fibrous tissue) are visually distinctive enough to survive preprocessing changes.
 
-### Key Difference Between Messidor and DDR
+### EyePACS — After Ben Graham
+```
+[[24538   826   219    48   179]   ← Class 0: 24538/25810, but 1272 spread to other classes
+ [ 2335    67    20     8    13]   ← Class 1: 67/2443 correct, 2335 → Class 0
+ [ 4554   361   262    60    55]   ← Class 2: 262/5292 correct, 4554 → Class 0
+ [  558    68   146    73    28]   ← Class 3: 73/873 correct, spread across classes
+ [  321    55    78    36   218]]   ← Class 4: 218/708 correct (~31%)
+```
 
-DDR uses the **same 0-4 grading scale** as APTOS. Messidor maps grade 3 → APTOS Class 4 with no Class 3. DDR's Class 4 images are genuine APTOS-equivalent proliferative cases — the model has seen this visual pattern. Messidor's Class 4 is a remapped grade that doesn't correspond exactly to what the model learned as "Proliferative."
+**Pattern**: **Unique finding** — the only dataset without near-total Class 0 collapse. Class 0 still dominates but there's genuine spread: 826 true Class 0 predicted as Class 1, 219 as Class 2. Class 3 shows predictions spread across three classes (558→0, 146→2, 73 correct) — not seen in Messidor at all. The model is making varied wrong predictions rather than defaulting to one bucket.
 
-DDR's partial survival of Class 4 while Class 1/2 collapse is consistent with: severe DR has distinctive enough lesion morphology to partially transfer across populations, while mild/moderate DR is ambiguous and collapses to the majority class.
+This qualitatively different failure mode reflects the parent-child relationship. APTOS is curated from EyePACS, so even after BG changes the appearance profile, there's enough residual representational overlap for varied (though still wrong) predictions rather than degenerate collapse. The maximum Mahalanobis distance of 152 is the highest in the BG evaluation — EyePACS contains extreme tail images (poor quality, partial coverage, bad lighting) that land very far from anything the model has seen.
+
+### Key Patterns Across All Datasets
+
+1. **Label compatibility matters**: Datasets using the same 0-4 scale as APTOS (IDRiD, DDR, EyePACS) show partial Class 4 survival. Messidor's grade remapping hurts.
+2. **Population proximity matters**: IDRiD (Indian, similar to APTOS) is the only dataset where BG helps. Messidor (European) collapses hardest.
+3. **Severity determines survivability**: Across DDR and EyePACS, Class 4 features survive BG better than Class 1/2 features. Distinctive pathology transfers; ambiguous pathology doesn't.
+4. **Failure mode depends on overlap**: EyePACS (parent dataset) shows spread failure. Messidor (no relationship) shows collapse failure. The qualitative mode, not just the magnitude, differs.
 
 ---
 
@@ -125,14 +176,19 @@ flowchart TD
 | Distances ~2x baseline for all OOD datasets ([EXP_011](file:///d:/Image%20Recognition/APTOS/aptos2019-blindness-detection/experiments/EXP_011_MAHALANOBIS_DIST.md)) | Feature space encodes something beyond DR grades | Indirect |
 | Distance doesn't correlate with QWK (IDRiD highest distance, best QWK) | The shift is in different dimensions for different datasets | Moderate |
 | Ben Graham collapses distances but not QWK | Appearance component was large but not the classification-relevant component | **Strong** |
-| Class 0 collapse pattern after Ben Graham | Convergence is toward majority class, not toward correct class | **Strong** |
+| Class 0 collapse pattern after Ben Graham (Messidor, DDR) | Convergence is toward majority class, not toward correct class | **Strong** |
+| EyePACS spread failure — varied wrong predictions, not collapse | Parent-child overlap produces confused model rather than degenerate one — features partially transfer but to wrong classes | **Strong** |
 | IDRiD uncertainty rises to 0.77 with BG, Certain+Wrong drops to 5 | Removing appearance reveals honest uncertainty — previous results were "accidentally correct" | Moderate |
 | DDR Class 4 partially survives (49%) but Class 1/2 collapses | Distinctive DR features transfer, ambiguous ones don't — consistent with mixed representations | Moderate |
+| Messidor G2 is maximally confident (0.13 uncertain) while being maximally wrong (QWK 0.22) | Deepest silent failure — H1 features + H5 confidence geometry compound | **Strong** |
+| EyePACS max distance 152 (highest in evaluation) | Extreme tail images exist even in parent dataset — heterogeneity survives BG normalization | Moderate |
 
 ### What H1 Doesn't Explain
 
-- **Why IDRiD is immune to the QWK drop** with Ben Graham. If the model learned APTOS-specific features, IDRiD should also suffer. The fact that it doesn't suggests IDRiD's DR features overlap with APTOS's more than Messidor's or DDR's — possibly because IDRiD is Indian population with similar equipment.
+- **Why IDRiD is immune to the QWK drop** with Ben Graham. If the model learned APTOS-specific features, IDRiD should also suffer. The fact that it doesn't suggests IDRiD's DR features overlap with APTOS's more than Messidor's, DDR's, or even EyePACS's — possibly because IDRiD is Indian population with similar equipment.
+- **Why EyePACS shows spread failure instead of collapse failure**. If the features are dataset-specific, EyePACS should collapse like Messidor. The parent-child relationship provides partial representational overlap that softens the failure mode — but H1 doesn't predict this qualitative difference, only the fact of failure.
 - **The specific mechanism** by which dataset-specific features get entangled with DR features. Is it texture bias? Color channel correlations? ImageNet pretraining inductive bias? H1 says "the model learned wrong features" but not *which* wrong features or *why*.
+- **The inter-hospital variation within Messidor** (G2 dramatically worse than G1/G3). H1 predicts uniform failure for a given dataset, but the per-group variation suggests scanner-specific feature entanglement at a finer granularity than "dataset."
 
 ---
 
@@ -264,15 +320,16 @@ flowchart LR
 
 ### Test 2: UMAP/PCA Feature Visualization ⏱️ ~2 hours
 
-**What**: Extract 1280-d features for APTOS val + IDRiD + Messidor + DDR (with and without Ben Graham). Run UMAP. Create two plots:
-1. Colored by **dataset source** (APTOS, IDRiD, Messidor, DDR)
+**What**: Extract 1280-d features for APTOS val + IDRiD + Messidor + DDR + EyePACS (with and without Ben Graham). Run UMAP. Create two plots:
+1. Colored by **dataset source** (APTOS, IDRiD, Messidor, DDR, EyePACS)
 2. Colored by **DR grade** (0, 1, 2, 3, 4)
 
 **Discriminates**: H1 (globally)
 - **H1 predicts**: Dataset-source coloring shows tight, separated clusters. Grade coloring shows overlap within clusters. After Ben Graham, clusters merge but grade structure within the merged cluster is lost — everything converges toward Class 0 region.
 - **If H1 is false**: Grade coloring shows clear separation regardless of dataset. Dataset clusters may exist but grade boundaries survive within them.
+- **EyePACS-specific prediction**: EyePACS images should show more overlap with APTOS than Messidor does (parent-child relationship), explaining the spread failure vs collapse failure distinction.
 
-**Specific falsifiable prediction from H1**: Messidor Class 4 images should cluster near APTOS Class 0 images after Ben Graham. This is the most direct visual evidence possible.
+**Specific falsifiable prediction from H1**: Messidor Class 4 images should cluster near APTOS Class 0 images after Ben Graham. EyePACS Class 4 should be more dispersed — some near Class 0, some near correct region.
 
 ---
 
@@ -347,5 +404,7 @@ Regardless of which hypothesis dominates, the results strengthen the case for do
 - **If H4 dominates** → DANN forces the encoder away from texture features (which are scanner-specific) toward shape features (which are DR-invariant). This is exactly the debiasing DANN was designed for.
 - **If H5 dominates** → DANN doesn't directly fix the confidence geometry, but by cleaning up the feature space, it would make existing uncertainty methods (MC dropout, Mahalanobis) more reliable.
 - **If H6 dominates** → DANN cannot fix label semantics. This would need to be addressed separately through label harmonization before training.
+
+The EyePACS result adds a critical nuance: the spread failure mode (varied wrong predictions) vs the collapse failure mode (everything → Class 0) suggests DANN may need to handle these differently. For Messidor-like collapse, DANN needs to create entirely new representational structure. For EyePACS-like spread, DANN needs to sharpen existing but blurry class boundaries. The parent-child relationship means EyePACS is the most realistic deployment scenario — and the one where DANN has the best chance of working because partial feature overlap already exists.
 
 The Ben Graham experiment has effectively removed H3 as a confounder and exposed the deeper problem. Because the model was retrained with consistent preprocessing, there is no train/test mismatch to blame — the failure is purely representational. The path forward is: **run Tests 1–3 to identify the dominant remaining hypothesis, then proceed to DANN with a clearer understanding of what it needs to fix.**
