@@ -25,7 +25,7 @@ DATASET_REGISTRY = {
         "target_path": r"/kaggle/input/datasets/antiti/messidor-grp-dataset/messidor_grp/messidor_grp/grp_1/base1.csv",
         "image_col": "Image name",
         "diagnosis_col": "Retinopathy grade",
-        "extension": ".tif",  # Adjust extension if Messidor uses tif/png instead of jpg
+        "extension": "",  # Adjust extension if Messidor uses tif/png instead of jpg
         "num_classes": 5,
         "class_names": ["No DR", "Mild", "Moderate", "Severe", "Proliferative"]
     },
@@ -34,7 +34,7 @@ DATASET_REGISTRY = {
         "target_path": r"/kaggle/input/datasets/antiti/messidor-grp-dataset/messidor_grp/messidor_grp/grp_2/base2.csv",
         "image_col": "Image name",
         "diagnosis_col": "Retinopathy grade",
-        "extension": ".tif",
+        "extension": "",
         "num_classes": 5,
         "class_names": ["No DR", "Mild", "Moderate", "Severe", "Proliferative"]
     },
@@ -43,7 +43,7 @@ DATASET_REGISTRY = {
         "target_path": r"/kaggle/input/datasets/antiti/messidor-grp-dataset/messidor_grp/messidor_grp/grp_3/base3.csv",
         "image_col": "Image name",
         "diagnosis_col": "Retinopathy grade",
-        "extension": ".tif",
+        "extension": "",
         "num_classes": 5,
         "class_names": ["No DR", "Mild", "Moderate", "Severe", "Proliferative"]
     },
@@ -52,7 +52,7 @@ DATASET_REGISTRY = {
         "target_path": r"/kaggle/input/datasets/dreamer07/eyepacs/trainLabels.csv/trainLabels.csv", 
         "image_col": "image",
         "diagnosis_col": "level",
-        "extension": ".jpg",
+        "extension": ".jpeg",
         "num_classes": 5,
         "class_names": ["No DR", "Mild", "Moderate", "Severe", "Proliferative"]
     },
