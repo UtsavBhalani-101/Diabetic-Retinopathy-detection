@@ -10,10 +10,13 @@ import numpy as np
 import torch
 import wandb
 import datetime
+
+from dotenv import load_dotenv
 from sklearn.metrics import cohen_kappa_score
 
 from pipeline.setup.utils import DATASET_REGISTRY
 from pipeline.setup.config import (
+    BASE_CONFIG,
     UNCERTAINTY_ENTROPY_THRESHOLD,
     UNCERTAINTY_MARGIN_THRESHOLD,
     UNCERTAINTY_MC_STD_THRESHOLD
@@ -30,6 +33,21 @@ from pipeline.evaluation.calibration import (
 )
 
 logger = logging.getLogger(__name__)
+
+def setup_wandb() -> None:
+    """
+    Load .env and authenticate wandb using the API key.
+    Falls back to interactive login if no key is found.
+    """
+    load_dotenv()  # reads .env at project root → os.environ
+    api_key = os.environ.get("WANDB_API_KEY")
+    if api_key:
+        wandb.login(key=api_key)
+        logger.info("wandb authenticated via WANDB_API_KEY from .env")
+    else:
+        logger.warning("WANDB_API_KEY not found in .env — falling back to interactive login")
+        wandb.login()
+
 
 
 def train_model(dataset_name: str, config: dict) -> float:
@@ -89,7 +107,8 @@ def train_model(dataset_name: str, config: dict) -> float:
     # ------------------------------------------------------------------
     # 3.  wandb init — all static + dynamic fields in one dict
     # ------------------------------------------------------------------
-    wandb.login()
+    # wandb authentication is handled centrally in run_pipeline.setup_wandb()
+
     run_config = {
         "dataset":             dataset_name,
         "model":               config["model"],
@@ -314,3 +333,7 @@ def train_model(dataset_name: str, config: dict) -> float:
     wandb.finish()
     logger.info("train_model() complete.")
     return optimal_T
+
+if __name__ == "__main__":
+    setup_wandb()
+    train_model(dataset_name="APTOS_2019", config=BASE_CONFIG)

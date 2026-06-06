@@ -17,10 +17,13 @@ import os
 import torch
 import wandb
 import datetime
+
+from dotenv import load_dotenv
 from sklearn.metrics import cohen_kappa_score, confusion_matrix
 
 from pipeline.setup.utils import DATASET_REGISTRY
 from pipeline.setup.config import (
+    BASE_CONFIG,
     UNCERTAINTY_ENTROPY_THRESHOLD,
     UNCERTAINTY_MARGIN_THRESHOLD,
     UNCERTAINTY_MC_STD_THRESHOLD
@@ -36,6 +39,21 @@ from pipeline.evaluation.calibration import (
 )
 
 logger = logging.getLogger(__name__)
+
+def setup_wandb() -> None:
+    """
+    Load .env and authenticate wandb using the API key.
+    Falls back to interactive login if no key is found.
+    """
+    load_dotenv()  # reads .env at project root → os.environ
+    api_key = os.environ.get("WANDB_API_KEY")
+    if api_key:
+        wandb.login(key=api_key)
+        logger.info("wandb authenticated via WANDB_API_KEY from .env")
+    else:
+        logger.warning("WANDB_API_KEY not found in .env — falling back to interactive login")
+        wandb.login()
+
 
 
 def test_model(dataset_name: str, model_path: str, optimal_T: float,
@@ -75,7 +93,8 @@ def test_model(dataset_name: str, model_path: str, optimal_T: float,
     # ------------------------------------------------------------------
     # 2.  wandb init (separate run, job_type="test")
     # ------------------------------------------------------------------
-    wandb.login()
+    # wandb authentication is handled centrally in run_pipeline.setup_wandb()
+
     run = wandb.init(  # noqa: F841
         project=config["project_name"],
         job_type="test",
@@ -194,3 +213,10 @@ def test_model(dataset_name: str, model_path: str, optimal_T: float,
 
     wandb.finish()
     logger.info(f"[{dataset_name}] test_model() complete.")
+
+if __name__ == "__main__":
+    setup_wandb()
+    datasets = ["IDRiD", "DDR-China", "Messidor-Grp1", "Messidor-Grp2", "Messidor-Grp3", "EyePACS-Resized"]
+    for dataset in datasets:
+        test_model(dataset_name=dataset, model_path=r"D:\Image Recognition\APTOS\aptos2019-blindness-detection\artifacts\weights\aptos_efficientnet.pth", 
+        optimal_T=0.9262, config=BASE_CONFIG, use_test_split=False)

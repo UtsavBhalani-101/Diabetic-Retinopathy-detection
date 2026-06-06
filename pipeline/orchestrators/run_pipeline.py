@@ -8,12 +8,32 @@
 # ============================================================
 
 import logging
+import os
+
+from dotenv import load_dotenv
+import wandb
 
 from pipeline.setup.config import BASE_CONFIG, setup_logging
 from pipeline.orchestrators.train import train_model
 from pipeline.orchestrators.test import test_model
 
 logger = logging.getLogger(__name__)
+
+
+def setup_wandb() -> None:
+    """
+    Load .env and authenticate wandb using the API key.
+    Falls back to interactive login if no key is found.
+    """
+    load_dotenv()  # reads .env at project root → os.environ
+    api_key = os.environ.get("WANDB_API_KEY")
+    if api_key:
+        wandb.login(key=api_key)
+        logger.info("wandb authenticated via WANDB_API_KEY from .env")
+    else:
+        logger.warning("WANDB_API_KEY not found in .env — falling back to interactive login")
+        wandb.login()
+
 
 
 def orchestrator(config: dict | None = None) -> None:
@@ -66,4 +86,5 @@ def orchestrator(config: dict | None = None) -> None:
 
 if __name__ == "__main__":
     setup_logging()          # timestamps → console + artifacts/pipeline.log
+    setup_wandb()            # authenticate wandb from .env (no interactive prompt)
     orchestrator()

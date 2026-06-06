@@ -14,7 +14,7 @@ DATASET_REGISTRY = {
     "DDR-China": {
         "image_path": r"/kaggle/input/datasets/mariaherrerot/ddrdataset/DR_grading/DR_grading",
         "target_path": r"/kaggle/input/datasets/mariaherrerot/ddrdataset/DR_grading.csv",
-        "image_col": "image_name",
+        "image_col": "id_code",
         "diagnosis_col": "diagnosis",
         "extension": "jpg",
         "num_classes": 5,
