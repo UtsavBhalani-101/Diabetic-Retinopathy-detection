@@ -13,13 +13,14 @@
 
 import logging
 import os
-
+import numpy as np
 import torch
 import wandb
 import datetime
 
 from dotenv import load_dotenv
 from sklearn.metrics import cohen_kappa_score, confusion_matrix
+from wandb.apis.public import artifacts
 
 from pipeline.setup.utils import DATASET_REGISTRY
 from pipeline.setup.config import (
@@ -216,7 +217,12 @@ def test_model(dataset_name: str, model_path: str, optimal_T: float,
 
 if __name__ == "__main__":
     setup_wandb()
+
+    # Read paths from config — same keys that train_model() uses to save
+    model_path = BASE_CONFIG["model_save_path"]
+    optimal_T  = float(np.load(BASE_CONFIG["optimal_T_save_path"]))
+
     datasets = ["IDRiD", "DDR-China", "Messidor-Grp1", "Messidor-Grp2", "Messidor-Grp3", "EyePACS-Resized"]
     for dataset in datasets:
-        test_model(dataset_name=dataset, model_path=r"D:\Image Recognition\APTOS\aptos2019-blindness-detection\artifacts\weights\aptos_efficientnet.pth", 
-        optimal_T=0.9262, config=BASE_CONFIG, use_test_split=False)
+        test_model(dataset_name=dataset, model_path=model_path,
+                   optimal_T=optimal_T, config=BASE_CONFIG, use_test_split=False)
