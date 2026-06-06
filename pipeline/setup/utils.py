@@ -16,7 +16,7 @@ DATASET_REGISTRY = {
         "target_path": r"/kaggle/input/datasets/mariaherrerot/ddrdataset/DR_grading.csv",
         "image_col": "id_code",
         "diagnosis_col": "diagnosis",
-        "extension": "jpg",
+        "extension": "",
         "num_classes": 5,
         "class_names": ["No DR", "Mild", "Moderate", "Severe", "Proliferative"]
     },
