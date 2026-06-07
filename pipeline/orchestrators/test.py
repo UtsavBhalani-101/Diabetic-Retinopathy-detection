@@ -197,13 +197,13 @@ def test_model(dataset_name: str, model_path: str, optimal_T: float,
     # ------------------------------------------------------------------
 
     per_class_mean_from_train = np.load(BASE_CONFIG["mahalanobis_mean_save_path"], allow_pickle=True).item()
-    per_class_inv_cov_from_train = np.load(BASE_CONFIG["mahalanobis_inv_cov_save_path"], allow_pickle=True).item()
+    global_inv_cov_from_train = np.load(BASE_CONFIG["mahalanobis_inv_cov_save_path"], allow_pickle=True)
 
     mahalanobis_save_dir = f"artifacts/mahalanobis/{dataset_name.replace(' ', '_')}"
     per_class_distances, mahal_labels = calculate_mahalanobis_distance(
         model, loader, device, num_classes,
         per_class_mean=per_class_mean_from_train,
-        per_class_inv_cov=per_class_inv_cov_from_train,
+        global_inv_cov=global_inv_cov_from_train,
         save_dir=mahalanobis_save_dir
     )
 

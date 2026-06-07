@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 def calculate_mahalanobis_distance(model, loader, device, num_classes,
-                                   per_class_mean, per_class_inv_cov,
+                                   per_class_mean, global_inv_cov,
                                    save_dir="artifacts/mahalanobis"):
     """
     Compute Mahalanobis distance of every test sample to each class-conditional
@@ -28,9 +28,9 @@ def calculate_mahalanobis_distance(model, loader, device, num_classes,
     per_class_mean : dict[int, np.ndarray]
         ``{class_idx: mean_feature_vector}`` fitted on training data.
         Each value has shape ``[D]`` where D is the feature dimension.
-    per_class_inv_cov : dict[int, np.ndarray]
-        ``{class_idx: inverse_covariance_matrix}`` fitted on training data.
-        Each value has shape ``[D, D]``.
+    global_inv_cov : np.ndarray
+        Single global inverse covariance matrix fitted on all training data.
+        Has shape ``[D, D]``.
     save_dir : str
         Directory where per-class ``.npy`` distance files and labels are saved.
         Defaults to ``artifacts/mahalanobis``.
@@ -74,12 +74,11 @@ def calculate_mahalanobis_distance(model, loader, device, num_classes,
                     f"({class_names[c]})...")
 
         mean_c = per_class_mean[c]
-        inv_cov_c = per_class_inv_cov[c]
 
         distances = np.empty(n_samples)
         for i in range(n_samples):
-            # sqrt((x - μ_c)^T  Σ_c^{-1}  (x - μ_c))
-            distances[i] = mahalanobis(all_features[i], mean_c, inv_cov_c)
+            # sqrt((x - μ_c)^T  Σ^{-1}  (x - μ_c))
+            distances[i] = mahalanobis(all_features[i], mean_c, global_inv_cov)
 
         per_class_distances[c] = distances
 

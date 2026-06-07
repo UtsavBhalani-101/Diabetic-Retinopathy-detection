@@ -123,7 +123,8 @@ def build_loader_for_testing(dataset_name: str, config: dict,
         img_col=reg["image_col"],
         label_col=reg["diagnosis_col"],
         transforms=val_transformer,
-        extension=reg["extension"]
+        extension=reg["extension"],
+        num_samples=config.get("test_max_samples")
     )
 
     loader = DataLoader(

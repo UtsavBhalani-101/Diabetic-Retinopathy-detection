@@ -116,6 +116,7 @@ BASE_CONFIG: dict = {
     "calib_plot_train_path": "artifacts/calibration/plots/calibration_train.png",
     "mahalanobis_mean_save_path": "artifacts/mahalanobis/mean.npy",
     "mahalanobis_inv_cov_save_path": "artifacts/mahalanobis/inv_cov.npy",
+    "test_max_samples": 2000,
 }
 
 

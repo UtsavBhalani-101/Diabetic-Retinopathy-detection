@@ -82,9 +82,21 @@ class RetinopathyDataset(Dataset):
         else:
             self.df = pd.read_csv(target_path, usecols=[self.img_col, self.label_col]).reset_index(drop=True)
         
-        if num_samples:
-            self.df = self.df.head(num_samples)
-            logger.debug(f"RetinopathyDataset: sampled {num_samples} rows from CSV")
+        if num_samples and len(self.df) > num_samples:
+            try:
+                from sklearn.model_selection import train_test_split
+                _, sample_df = train_test_split(
+                    self.df,
+                    test_size=num_samples,
+                    random_state=42,
+                    stratify=self.df[self.label_col]
+                )
+                self.df = sample_df.reset_index(drop=True)
+                logger.debug(f"RetinopathyDataset: stratified sampled {num_samples} rows from CSV")
+            except ValueError:
+                # Fallback to random sample if stratify fails (e.g., if a class has fewer than 2 samples)
+                self.df = self.df.sample(n=num_samples, random_state=42).reset_index(drop=True)
+                logger.debug(f"RetinopathyDataset: randomly sampled {num_samples} rows from CSV")
 
         logger.info(
             f"RetinopathyDataset | rows={len(self.df)} | ext={extension}"

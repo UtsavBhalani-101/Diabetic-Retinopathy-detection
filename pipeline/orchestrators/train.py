@@ -351,17 +351,17 @@ def train_model(dataset_name: str, config: dict) -> float:
     D = train_features.shape[1]
 
     per_class_mean = {}
-    per_class_inv_cov = {}
     class_names = ["No DR", "Mild", "Moderate", "Severe", "Proliferative"]
 
     for c in range(num_classes):
         class_features = train_features[train_labels_arr == c]
         per_class_mean[c] = class_features.mean(axis=0)
-        # Regularise covariance to prevent singularity in high-dim space
-        cov = np.cov(class_features, rowvar=False) + 1e-6 * np.eye(D)
-        per_class_inv_cov[c] = np.linalg.inv(cov)
         logger.info(f"  Class {c} ({class_names[c]}): {class_features.shape[0]} samples, "
                     f"mean norm={np.linalg.norm(per_class_mean[c]):.4f}")
+
+    # Compute a single global shared covariance matrix from all validation samples
+    global_cov = np.cov(train_features, rowvar=False) + 1e-6 * np.eye(D)
+    global_inv_cov = np.linalg.inv(global_cov)
 
     mahalanobis_dir = os.path.dirname(
         config.get("mahalanobis_mean_save_path", "artifacts/mahalanobis/mean.npy")
@@ -372,13 +372,13 @@ def train_model(dataset_name: str, config: dict) -> float:
     inv_cov_path = config.get("mahalanobis_inv_cov_save_path", "artifacts/mahalanobis/inv_cov.npy")
 
     np.save(mean_path, np.array(per_class_mean, dtype=object))
-    np.save(inv_cov_path, np.array(per_class_inv_cov, dtype=object))
+    np.save(inv_cov_path, global_inv_cov)
     logger.info(f"Per-class mean saved     → {mean_path}")
-    logger.info(f"Per-class inv_cov saved  → {inv_cov_path}")
+    logger.info(f"Global inv_cov saved     → {inv_cov_path}")
 
     wandb.finish()
     logger.info("train_model() complete.")
-    return optimal_T, per_class_mean, per_class_inv_cov
+    return optimal_T, per_class_mean, global_inv_cov
 
 if __name__ == "__main__":
     setup_wandb()
