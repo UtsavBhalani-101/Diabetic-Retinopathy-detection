@@ -52,7 +52,7 @@ def orchestrator(config: dict | None = None) -> None:
     logger.info("STEP 1: Training on APTOS_2019")
     logger.info("=" * 60)
 
-    optimal_T = train_model("APTOS_2019", cfg)
+    optimal_T, _, _ = train_model("APTOS_2019", cfg)
 
     logger.info(f"Training complete | optimal_T={optimal_T:.4f}")
     logger.info("Starting zero-shot evaluation on external datasets...")

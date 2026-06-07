@@ -33,6 +33,7 @@ from pipeline.setup.config import setting_gpu
 from pipeline.data.loaders import build_loader_for_testing
 from pipeline.training_loop_setup.model import EfficientNetMC
 from pipeline.evaluation.evaluate import mc_evaluate_full, compute_uncertainty_signals
+from pipeline.evaluation.mahalanobis import calculate_mahalanobis_distance
 from pipeline.evaluation.calibration import (
     apply_temperature,
     per_class_calibration,
@@ -192,7 +193,24 @@ def test_model(dataset_name: str, model_path: str, optimal_T: float,
     per_class_calibration(calibrated_probs, all_labels_arr, save_path=backup_calib_path)
 
     # ------------------------------------------------------------------
-    # 9.  wandb log
+    # 9.  Mahalanobis Distance (per-class)
+    # ------------------------------------------------------------------
+
+    per_class_mean_from_train = np.load(BASE_CONFIG["mahalanobis_mean_save_path"], allow_pickle=True).item()
+    per_class_inv_cov_from_train = np.load(BASE_CONFIG["mahalanobis_inv_cov_save_path"], allow_pickle=True).item()
+
+    mahalanobis_save_dir = f"artifacts/mahalanobis/{dataset_name.replace(' ', '_')}"
+    per_class_distances, mahal_labels = calculate_mahalanobis_distance(
+        model, loader, device, num_classes,
+        per_class_mean=per_class_mean_from_train,
+        per_class_inv_cov=per_class_inv_cov_from_train,
+        save_dir=mahalanobis_save_dir
+    )
+
+
+
+    # ------------------------------------------------------------------
+    # 10.  wandb log
     # ------------------------------------------------------------------
     wandb.log({
         "test_qwk":                 float(qwk),

@@ -330,9 +330,55 @@ def train_model(dataset_name: str, config: dict) -> float:
     logger.info(f"Model saved     → {model_path} (Backup: {backup_model_path})")
     logger.info(f"Optimal T saved → {T_path} (Backup: {backup_T_path}) (T={optimal_T:.4f})")
 
+    # ------------------------------------------------------------------
+    # 7.  Compute & save per-class Mahalanobis reference distributions
+    # ------------------------------------------------------------------
+    logger.info("Computing per-class Mahalanobis reference distributions from val set...")
+
+    model.eval()
+    train_features = []
+    train_labels_list = []
+
+    with torch.no_grad():
+        for images, labels in val_loader:
+            images = images.to(device)
+            features = model.base(images)  # [B, D]
+            train_features.append(features.cpu().numpy())
+            train_labels_list.extend(labels.numpy())
+
+    train_features = np.vstack(train_features)       # [N_train, D]
+    train_labels_arr = np.array(train_labels_list)
+    D = train_features.shape[1]
+
+    per_class_mean = {}
+    per_class_inv_cov = {}
+    class_names = ["No DR", "Mild", "Moderate", "Severe", "Proliferative"]
+
+    for c in range(num_classes):
+        class_features = train_features[train_labels_arr == c]
+        per_class_mean[c] = class_features.mean(axis=0)
+        # Regularise covariance to prevent singularity in high-dim space
+        cov = np.cov(class_features, rowvar=False) + 1e-6 * np.eye(D)
+        per_class_inv_cov[c] = np.linalg.inv(cov)
+        logger.info(f"  Class {c} ({class_names[c]}): {class_features.shape[0]} samples, "
+                    f"mean norm={np.linalg.norm(per_class_mean[c]):.4f}")
+
+    mahalanobis_dir = os.path.dirname(
+        config.get("mahalanobis_mean_save_path", "artifacts/mahalanobis/mean.npy")
+    )
+    os.makedirs(mahalanobis_dir, exist_ok=True)
+
+    mean_path    = config.get("mahalanobis_mean_save_path",    "artifacts/mahalanobis/mean.npy")
+    inv_cov_path = config.get("mahalanobis_inv_cov_save_path", "artifacts/mahalanobis/inv_cov.npy")
+
+    np.save(mean_path, np.array(per_class_mean, dtype=object))
+    np.save(inv_cov_path, np.array(per_class_inv_cov, dtype=object))
+    logger.info(f"Per-class mean saved     → {mean_path}")
+    logger.info(f"Per-class inv_cov saved  → {inv_cov_path}")
+
     wandb.finish()
     logger.info("train_model() complete.")
-    return optimal_T
+    return optimal_T, per_class_mean, per_class_inv_cov
 
 if __name__ == "__main__":
     setup_wandb()
