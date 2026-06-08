@@ -114,7 +114,7 @@ BASE_CONFIG: dict = {
     "model_save_path": "artifacts/weights/aptos_efficientnet.pth",
     "optimal_T_save_path": "artifacts/calibration/optimal_T.npy",
     "calib_plot_train_path": "artifacts/calibration/plots/calibration_train.png",
-    "mahalanobis_mean_save_path": "artifacts/mahalanobis/mean.npy",
+    "class_centroids_save_path": "artifacts/centroids/mean.npy",
     "mahalanobis_inv_cov_save_path": "artifacts/mahalanobis/inv_cov.npy",
     "test_max_samples": 2000,
 }

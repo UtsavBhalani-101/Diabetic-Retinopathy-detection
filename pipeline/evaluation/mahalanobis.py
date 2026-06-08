@@ -8,9 +8,15 @@ from scipy.spatial.distance import mahalanobis
 logger = logging.getLogger(__name__)
 
 
-def calculate_mahalanobis_distance(model, loader, device, num_classes,
-                                   per_class_mean, global_inv_cov,
-                                   save_dir="artifacts/mahalanobis"):
+def calculate_mahalanobis_distance(
+    model,
+    loader,
+    device,
+    num_classes,
+    per_class_mean,
+    global_inv_cov,
+    save_dir="artifacts/mahalanobis",
+):
     """
     Compute Mahalanobis distance of every test sample to each class-conditional
     Gaussian fitted on training features, then log per-class and global
@@ -55,23 +61,26 @@ def calculate_mahalanobis_distance(model, loader, device, num_classes,
     with torch.no_grad():
         for images, labels in loader:
             images = images.to(device)
-            features = model.base(images)           # [B, D]
+            features = model.base(images)  # [B, D]
             all_features.append(features.cpu().numpy())
             all_labels.extend(labels.numpy())
 
-    all_features = np.vstack(all_features)          # [N, D]
+    all_features = np.vstack(all_features)  # [N, D]
     all_labels = np.array(all_labels)
     n_samples = all_features.shape[0]
 
-    logger.info(f"Extracted features for {n_samples} samples, "
-                f"feature dim = {all_features.shape[1]}")
+    logger.info(
+        f"Extracted features for {n_samples} samples, "
+        f"feature dim = {all_features.shape[1]}"
+    )
 
     # ── 2. Per-class Mahalanobis distances ───────────────────────────────
     per_class_distances = {}
 
     for c in range(num_classes):
-        logger.info(f"Computing Mahalanobis distance to class {c} "
-                    f"({class_names[c]})...")
+        logger.info(
+            f"Computing Mahalanobis distance to class {c} ({class_names[c]})..."
+        )
 
         mean_c = per_class_mean[c]
 
@@ -92,8 +101,9 @@ def calculate_mahalanobis_distance(model, loader, device, num_classes,
 
         tag = class_names[c]
         print(f"  [{tag}]  min={min_d:.4f}  max={max_d:.4f}  avg={avg_d:.4f}")
-        logger.info(f"  Class {c} ({tag}) | "
-                    f"min={min_d:.4f}  max={max_d:.4f}  avg={avg_d:.4f}")
+        logger.info(
+            f"  Class {c} ({tag}) | min={min_d:.4f}  max={max_d:.4f}  avg={avg_d:.4f}"
+        )
 
         wandb_payload[f"Mahalanobis/{tag}/Min"] = round(min_d, 4)
         wandb_payload[f"Mahalanobis/{tag}/Max"] = round(max_d, 4)
@@ -105,8 +115,10 @@ def calculate_mahalanobis_distance(model, loader, device, num_classes,
     global_max = float(all_dists.max())
     global_avg = float(all_dists.mean())
 
-    print(f"\n  [Global]  min={global_min:.4f}  max={global_max:.4f}  "
-          f"avg={global_avg:.4f}")
+    print(
+        f"\n  [Global]  min={global_min:.4f}  max={global_max:.4f}  "
+        f"avg={global_avg:.4f}"
+    )
 
     wandb_payload["Mahalanobis/Global/Min"] = round(global_min, 4)
     wandb_payload["Mahalanobis/Global/Max"] = round(global_max, 4)

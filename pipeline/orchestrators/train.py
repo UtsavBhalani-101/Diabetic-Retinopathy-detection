@@ -331,9 +331,9 @@ def train_model(dataset_name: str, config: dict) -> float:
     logger.info(f"Optimal T saved → {T_path} (Backup: {backup_T_path}) (T={optimal_T:.4f})")
 
     # ------------------------------------------------------------------
-    # 7.  Compute & save per-class Mahalanobis reference distributions
+    # 7.  Compute & save per-class reference distributions (for Cosine Similarity)
     # ------------------------------------------------------------------
-    logger.info("Computing per-class Mahalanobis reference distributions from val set...")
+    logger.info("Computing per-class reference distributions from val set (for Cosine Similarity)...")
 
     model.eval()
     train_features = []
@@ -359,26 +359,18 @@ def train_model(dataset_name: str, config: dict) -> float:
         logger.info(f"  Class {c} ({class_names[c]}): {class_features.shape[0]} samples, "
                     f"mean norm={np.linalg.norm(per_class_mean[c]):.4f}")
 
-    # Compute a single global shared covariance matrix from all validation samples
-    global_cov = np.cov(train_features, rowvar=False) + 1e-6 * np.eye(D)
-    global_inv_cov = np.linalg.inv(global_cov)
-
-    mahalanobis_dir = os.path.dirname(
-        config.get("mahalanobis_mean_save_path", "artifacts/mahalanobis/mean.npy")
+    centroid_dir = os.path.dirname(
+        config.get("class_centroids_save_path", "artifacts/centroids/mean.npy")
     )
-    os.makedirs(mahalanobis_dir, exist_ok=True)
+    os.makedirs(centroid_dir, exist_ok=True)
 
-    mean_path    = config.get("mahalanobis_mean_save_path",    "artifacts/mahalanobis/mean.npy")
-    inv_cov_path = config.get("mahalanobis_inv_cov_save_path", "artifacts/mahalanobis/inv_cov.npy")
-
+    mean_path = config.get("class_centroids_save_path", "artifacts/centroids/mean.npy")
     np.save(mean_path, np.array(per_class_mean, dtype=object))
-    np.save(inv_cov_path, global_inv_cov)
-    logger.info(f"Per-class mean saved     → {mean_path}")
-    logger.info(f"Global inv_cov saved     → {inv_cov_path}")
+    logger.info(f"Per-class mean (centroids) saved → {mean_path}")
 
     wandb.finish()
     logger.info("train_model() complete.")
-    return optimal_T, per_class_mean, global_inv_cov
+    return optimal_T, per_class_mean
 
 if __name__ == "__main__":
     setup_wandb()
