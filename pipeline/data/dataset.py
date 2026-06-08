@@ -16,23 +16,45 @@ logger = logging.getLogger(__name__)
 # ^ -------------------------- Ben Graham preprocessing --------------------------
 
 # In dataset.py — a custom transform class
-class BenGrahamPreprocess:
-    """Circle crop + Gaussian color subtraction (Ben Graham, 2015)."""
-    def __init__(self, sigmaX=10):
-        self.sigmaX = sigmaX
+# class BenGrahamPreprocess:
+#     """Circle crop + Gaussian color subtraction (Ben Graham, 2015)."""
+#     def __init__(self, sigmaX=10):
+#         self.sigmaX = sigmaX
+
+#     def __call__(self, img):
+#         # img is a PIL Image — convert to numpy, apply, convert back
+#         img = np.array(img)
+#         img = cv2.addWeighted(img, 4, cv2.GaussianBlur(img, (0, 0), self.sigmaX), -4, 128)
+#         return Image.fromarray(img)
+
+
+# ^ -------------------------- CLAHE preprocessing --------------------------
+
+class CLAHEPreprocess:
+    """Apply CLAHE (Contrast Limited Adaptive Histogram Equalization) to the L channel of LAB color space."""
+    def __init__(self, clip_limit=2.0, tile_grid_size=(8, 8)):
+        self.clip_limit = clip_limit
+        self.tile_grid_size = tile_grid_size
 
     def __call__(self, img):
         # img is a PIL Image — convert to numpy, apply, convert back
         img = np.array(img)
-        img = cv2.addWeighted(img, 4, cv2.GaussianBlur(img, (0, 0), self.sigmaX), -4, 128)
-        return Image.fromarray(img)
-
+        lab = cv2.cvtColor(img, cv2.COLOR_RGB2LAB)
+        l, a, b = cv2.split(lab)
+        
+        # Re-create CLAHE object inside __call__ to avoid multiprocessing pickle issues
+        clahe = cv2.createCLAHE(clipLimit=self.clip_limit, tileGridSize=self.tile_grid_size)
+        l2 = clahe.apply(l)
+        
+        lab2 = cv2.merge((l2, a, b))
+        img2 = cv2.cvtColor(lab2, cv2.COLOR_LAB2RGB)
+        return Image.fromarray(img2)
 
 
 # ^ -------------------------- transforms --------------------------
 
 val_transformer = transforms.Compose([
-    BenGrahamPreprocess(sigmaX=10),   # ← new first step
+    CLAHEPreprocess(clip_limit=2.0, tile_grid_size=(8, 8)),
     transforms.Resize((224, 224)),
     transforms.ToTensor(),
     transforms.Normalize(mean=[0.485, 0.456, 0.406],
@@ -40,7 +62,7 @@ val_transformer = transforms.Compose([
 ])
 
 train_transformer = transforms.Compose([
-    BenGrahamPreprocess(sigmaX=10),   # ← new first step
+    CLAHEPreprocess(clip_limit=2.0, tile_grid_size=(8, 8)),
     transforms.Resize((224, 224)),
     transforms.RandomHorizontalFlip(),
     transforms.RandomVerticalFlip(),

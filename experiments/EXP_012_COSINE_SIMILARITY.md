@@ -1,4 +1,4 @@
-this # Experiment 012: Cosine Similarity for Feature Direction Analysis
+# Experiment 012: Cosine Similarity for Feature Direction Analysis
 
 ## Goal
 To investigate whether the poor performance on external datasets like Messidor (which showed a surprisingly low Mahalanobis distance in EXP 011) is due to a directional shift in feature space. We analyze the cosine similarity between the extracted features of out-of-distribution (OOD) test sets and the class centroids computed from the APTOS training set.
