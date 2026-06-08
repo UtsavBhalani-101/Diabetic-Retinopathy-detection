@@ -115,7 +115,7 @@ BASE_CONFIG: dict = {
     "optimal_T_save_path": "artifacts/calibration/optimal_T.npy",
     "calib_plot_train_path": "artifacts/calibration/plots/calibration_train.png",
     "class_centroids_save_path": "artifacts/centroids/mean.npy",
-    "mahalanobis_inv_cov_save_path": "artifacts/mahalanobis/inv_cov.npy",
+    # "mahalanobis_inv_cov_save_path": "artifacts/mahalanobis/inv_cov.npy",
     "test_max_samples": 2000,
 }
 
