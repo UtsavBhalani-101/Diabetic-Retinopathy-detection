@@ -53,3 +53,13 @@
 - Messidor is closer overall but the shift specifically targets DR-relevant dimensions → classification breaks despite lower distance
 - this is directional feature corruption: the magnitude of shift matters less than its direction relative to the model's decision boundaries
 - implication: reliable OOD detection requires either (a) per-class distance to capture directional information, or (b) domain adaptation (DANN) to disentangle invariant from dataset-specific features before computing distance
+
+10. Why use Cosine Similarity for feature analysis after Mahalanobis distance?
+- Mahalanobis distance showed us that feature space shift happens, but it could not differentiate between benign shift (IDRiD) and malignant shift (Messidor). It only measured the *magnitude* of the shift, not the *direction*.
+- additionally, calculating a *per-class* Mahalanobis distance failed due to the curse of dimensionality. The feature space is 1280-D, but some classes have fewer than 50-100 samples.
+- Mahalanobis distance requires computing the inverse of the covariance matrix. When the number of samples is less than the number of dimensions (N < D), the covariance matrix is singular (non-invertible) and statistically impossible to measure accurately. This caused the per-class Mahalanobis distances to explode into the 1000s.
+- using a global centroid also didn't work for class-specific directional analysis. Thus, switching to Cosine similarity became a statistical necessity to handle high-dimensional, low-sample-size clusters without needing a covariance matrix.
+- we needed a metric to measure direction: if a sample from a middle class (like Moderate DR) is shifted, is it shifted randomly due to scanner noise, or is it specifically pulled toward another class centroid?
+- Cosine similarity measures the angle between vectors, ignoring magnitude. By measuring the cosine similarity of OOD samples to the APTOS training centroids, we can see exactly where the features are pointing.
+- this allowed us to confirm the "Directional Feature Corruption" hypothesis: on Messidor, the features for all classes are directionally pulled toward the Class 0 (No DR) centroid (avg similarity **0.5658**), while severe classes collapse near zero (Class 4 at **-0.0088**), causing silent, confident misclassifications.
+- this also explained the "Two-Party System" in DDR and EyePACS, where features are pulled toward the extremes (Class 0 and Class 4) because those classes have robust, visually distinct signatures. Middle classes (1, 2, 3) lose their directional identity and are absorbed by the extremes. For IDRiD on the other hand, the shift was purely benign with stable alignment across all pathological classes (**~0.32-0.44** avg similarity).

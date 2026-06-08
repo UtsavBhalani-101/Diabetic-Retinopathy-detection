@@ -77,3 +77,9 @@
 - another hypothesis is that the model is learning invariant features and dataset specific features, the distance in dataset specific features is high causing the model to be uncertain but the model still classifies correctly because it has learned the invariant features so the distance and performance are not correlated
 - but in Messidor, the distance in dataset specific features is low
 
+### 9. How does Cosine Similarity explain directional feature corruption?
+- While Mahalanobis distance measures the magnitude of shift, Cosine similarity measures direction.
+- **Messidor (Malignant Shift):** Features for non-Class-0 cases directionally collapse toward the Class 0 centroid. This is why Messidor has a low Mahalanobis distance but terrible QWK. The scanner artifacts cause mild/moderate DR features to look like healthy retinas to the model, leading to confident and wrong predictions. (e.g., Messidor-Grp2 Class 0 avg similarity is **0.5658**, while Class 4 is **-0.0088**).
+- **IDRiD (Benign Shift):** Cosine similarity is balanced across classes, meaning the DR-specific features transferred well. The high Mahalanobis distance comes from scanner artifact differences, which increases uncertainty but preserves correct classification. (e.g., IDRiD Class 1, 2, 3, 4 similarities average **0.40**, **0.43**, **0.32**, and **0.34** respectively).
+- **DDR & EyePACS:** These datasets exhibit a "two-party system" where features are pulled toward the extremes (Class 0 and Class 4) because those classes have robust, visually distinct signatures. Middle classes (1, 2, 3) lose their directional identity and are absorbed by the extremes.
+- This confirms that **severity determines feature robustness across domains**. The model's representations for extreme cases survive distribution shift better than those for the ambiguous middle classes.
