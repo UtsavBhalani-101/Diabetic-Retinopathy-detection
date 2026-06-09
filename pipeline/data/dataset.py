@@ -13,21 +13,6 @@ import cv2
 
 logger = logging.getLogger(__name__)
 
-# ^ -------------------------- Ben Graham preprocessing --------------------------
-
-# In dataset.py — a custom transform class
-# class BenGrahamPreprocess:
-#     """Circle crop + Gaussian color subtraction (Ben Graham, 2015)."""
-#     def __init__(self, sigmaX=10):
-#         self.sigmaX = sigmaX
-
-#     def __call__(self, img):
-#         # img is a PIL Image — convert to numpy, apply, convert back
-#         img = np.array(img)
-#         img = cv2.addWeighted(img, 4, cv2.GaussianBlur(img, (0, 0), self.sigmaX), -4, 128)
-#         return Image.fromarray(img)
-
-
 # ^ -------------------------- CLAHE preprocessing --------------------------
 
 class CLAHEPreprocess:

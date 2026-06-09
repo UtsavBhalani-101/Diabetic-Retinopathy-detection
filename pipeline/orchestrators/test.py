@@ -38,6 +38,7 @@ from pipeline.evaluation.calibration import (
     per_class_calibration,
     triage_sample
 )
+from pipeline.orchestrators.gradcam_analysis import run_batch_gradcam
 
 logger = logging.getLogger(__name__)
 
@@ -226,6 +227,22 @@ def test_model(dataset_name: str, model_path: str, optimal_T: float,
         ),
         "test_calibration_plot":    wandb.Image(calib_path),
     })
+
+    # ------------------------------------------------------------------
+    # 11. Batch Grad-CAM Analysis
+    # ------------------------------------------------------------------
+    logger.info(f"[{dataset_name}] Running Batch Grad-CAM Analysis...")
+    run_batch_gradcam(
+        model=model,
+        dataset=loader.dataset,
+        loader=loader,
+        device=device,
+        dataset_name=dataset_name,
+        img_dir=loader.dataset.img_path,
+        img_col=loader.dataset.img_col,
+        extension=loader.dataset.extension,
+        output_dir="results/gradcam_analysis"
+    )
 
     wandb.finish()
     logger.info(f"[{dataset_name}] test_model() complete.")
