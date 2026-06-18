@@ -92,17 +92,17 @@ def mc_evaluate_full(model, loader, device, T: int = 30):
             logit_passes = []
 
             for _ in range(T):
-                logits = model(images)
-                probs  = torch.softmax(logits, dim=1).cpu().numpy()
+                logits = model(images)      # [batch, 5]
+                probs  = torch.softmax(logits, dim=1).cpu().numpy()    # [batch, 5]
                 passes.append(probs)
-                logit_passes.append(logits.cpu().numpy())
+                logit_passes.append(logits.cpu().numpy())       # [batch, 5]
 
-            passes       = np.array(passes)        # [T, batch, C]
-            logit_passes = np.array(logit_passes)  # [T, batch, C]
+            passes       = np.array(passes)        # [T, batch, 5]
+            logit_passes = np.array(logit_passes)  # [T, batch, 5]
 
-            mean_probs  = passes.mean(axis=0)
-            mean_logits = logit_passes.mean(axis=0)
-            uncertainty = passes.std(axis=0).mean(axis=1)
+            mean_probs  = passes.mean(axis=0)   # [batch, 5]
+            mean_logits = logit_passes.mean(axis=0)   # [batch, 5]
+            uncertainty = passes.std(axis=0).mean(axis=1)   # [batch, 5]
 
             all_mean_probs.append(mean_probs)
             all_uncertainties.append(uncertainty)

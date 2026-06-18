@@ -37,6 +37,15 @@ Despite the massive gains in QWK under CLAHE, the Cosine Similarity scores (feat
 > [!NOTE]
 > The cosine similarity scores are extremely stable. While CLAHE improves QWK by rescuing the magnitudes and separability of features, the underlying "direction" they point toward in the high-dimensional feature space remains structurally shifted for external datasets.
 
+### 2.3 Triage & Uncertainty: Fixing the Class 0 Collapse
+
+Beyond just QWK, CLAHE fundamentally fixes the "Silent Collapse" failure mode that plagued Ben Graham. Under Ben Graham, the model confidently dumped most diseased eyes into Class 0 (No DR). CLAHE restores the structural integrity of the predictions and significantly reduces dangerous "Certain + Wrong" predictions (where the model is highly confident but incorrect, failing to refer the patient).
+
+| Dataset | BG "Certain + Wrong" | CLAHE "Certain + Wrong" | Clinical Impact |
+|---------|-----------------------|--------------------------|-----------------|
+| **DDR-China** | 32% (3864 cases) | **25%** (506 cases) | Massive Class 0 bias fixed; predictions are now distributed sensibly across severity levels rather than defaulting to healthy. |
+| **Messidor G1** | 36% (147 cases) | **37%** (148 cases) | While raw error counts remain similar, the *type* of error is safer. E.g., Proliferative DR cases now correctly land in severe neighborhoods instead of collapsing to No DR. |
+
 ## 3. Re-evaluating the Hypotheses
 
 Based on the CLAHE rescue, we must update our stance on the 5 core hypotheses.
@@ -69,8 +78,9 @@ Even though CLAHE fixes the *predictive* performance (QWK), the *features* of ex
 ### The IDRiD Anomaly (A Potential Control Case)
 An important observation from the results is IDRiD's inverse behavior compared to the rest of the external datasets:
 * When we applied Ben Graham originally, performance on all other datasets crashed, but IDRiD stayed robust (holding steady at ~0.62). 
-* Now, when we switch from Ben Graham to CLAHE, all other datasets experience massive gains, but IDRiD actually *drops* slightly (0.6175 → 0.6091).
-* **What this means:** IDRiD appears to act as a unique control case. Because it shares the same patient population (Indian) and likely similar acquisition equipment as APTOS, its underlying features are highly compatible with the training distribution. It seems uniquely immune to the destructive elements of Ben Graham, and simultaneously doesn't benefit from the contrast-equalization of CLAHE the way disparate datasets do. This hypothesis requires more data to fully confirm, but it highlights how population/equipment overlap dictates preprocessing sensitivity.
+* Now, when we switch from Ben Graham to CLAHE, all other datasets experience massive gains, but IDRiD actually *drops* slightly in QWK (0.6175 → 0.6091).
+* Its safety profile also worsened slightly under CLAHE: dangerous "Certain + Wrong" predictions increased from **5 (under BG)** to **20 (under CLAHE)**.
+* **What this means:** IDRiD appears to act as a unique control case. Because it shares the same patient population (Indian) and likely similar acquisition equipment as APTOS, its underlying features are highly compatible with the training distribution. It seems uniquely immune to the destructive elements of Ben Graham (even expressing "honest uncertainty" under it), and simultaneously doesn't benefit from the contrast-equalization of CLAHE the way disparate datasets do. This hypothesis requires more data to fully confirm, but it highlights how population/equipment overlap dictates preprocessing sensitivity.
 
 ## 4. Conclusion & Next Steps
 

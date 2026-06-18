@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 from sklearn.cluster import KMeans
 from sklearn.metrics import pairwise_distances_argmin_min
 
-from pytorch_grad_cam import GradCAM
+from pytorch_grad_cam import GradCAMPlusPlus
 from pytorch_grad_cam.utils.image import show_cam_on_image
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 
@@ -79,8 +79,8 @@ def run_batch_gradcam(model, dataset, loader, device, dataset_name, img_dir, img
     logger.info(f"[{dataset_name}] Clustering {len(wrong_indices)} wrong features into 5 clusters...")
     selected_wrong = get_representative_samples(wrong_indices, k=5)
 
-    target_layers = [model.base.conv_head]
-    cam = GradCAM(model=model, target_layers=target_layers)
+    target_layers = [model.base.blocks[-1]]
+    cam = GradCAMPlusPlus(model=model, target_layers=target_layers)
 
     def process_and_save(indices, category):
         out_dir = os.path.join(output_dir, dataset_name, category)
@@ -100,6 +100,7 @@ def run_batch_gradcam(model, dataset, loader, device, dataset_name, img_dir, img
             input_tensor = val_transformer(pil_img).unsqueeze(0).to(device)
             
             targets = [ClassifierOutputTarget(pred_label)]
+            model.eval()
             grayscale_cam = cam(input_tensor=input_tensor, targets=targets)
             grayscale_cam = grayscale_cam[0, :]
             
