@@ -38,16 +38,10 @@ logger = logging.getLogger("pipeline.run_idrid_gradcam")
 # Constants
 # ----------------------------------------------------------------
 
-# Resolve the project root from this script's location:
-#   __file__  = <root>/pipeline/orchestrators/run_idrid_gradcam.py
-#   2x parent = <root>
-# This makes ALL relative paths work regardless of os.getcwd().
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-
 CLASS_NAMES = ["No DR", "Mild", "Moderate", "Severe", "Proliferative"]
 
-# Default local IDRiD paths (anchored to PROJECT_ROOT)
-DEFAULT_IDRID_BASE = os.path.join(PROJECT_ROOT, "datasets", "IDRiD", "B. Disease Grading")
+# Hardcoded IDRiD base path (Kaggle input mount)
+DEFAULT_IDRID_BASE = "/kaggle/input/datasets/antiti/idrid-testing-dataset/IDRiD/B. Disease Grading"
 
 
 def _build_idrid_splits(idrid_base: str) -> dict:
