@@ -25,8 +25,7 @@ logger = logging.getLogger(__name__)
 # ----------------------------------------------------------------
 # Hardcoded IDRiD paths (same as run_idrid_gradcam.py)
 # ----------------------------------------------------------------
-IDRID_BASE = "datasets/IDRiD/B. Disease Grading"
-
+IDRID_BASE = "/kaggle/input/datasets/antiti/idrid-testing-dataset/IDRiD/B. Disease Grading"
 SPLITS = {
     "train": {
         "image_dir": f"{IDRID_BASE}/1. Original Images/a. Training Set",
