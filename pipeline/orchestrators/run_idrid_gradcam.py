@@ -38,21 +38,36 @@ logger = logging.getLogger("pipeline.run_idrid_gradcam")
 # Constants
 # ----------------------------------------------------------------
 
+# Resolve the project root from this script's location:
+#   __file__  = <root>/pipeline/orchestrators/run_idrid_gradcam.py
+#   2x parent = <root>
+# This makes ALL relative paths work regardless of os.getcwd().
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
 CLASS_NAMES = ["No DR", "Mild", "Moderate", "Severe", "Proliferative"]
 
-# Hardcoded local IDRiD paths (relative to project root)
-IDRID_BASE = os.path.join("datasets", "IDRiD", "B. Disease Grading")
+# Default local IDRiD paths (anchored to PROJECT_ROOT)
+DEFAULT_IDRID_BASE = os.path.join(PROJECT_ROOT, "datasets", "IDRiD", "B. Disease Grading")
 
-IDRID_SPLITS = {
-    "train": {
-        "image_dir": os.path.join(IDRID_BASE, "1. Original Images", "a. Training Set"),
-        "csv_path":  os.path.join(IDRID_BASE, "2. Groundtruths", "a. IDRiD_Disease Grading_Training Labels.csv"),
-    },
-    "test": {
-        "image_dir": os.path.join(IDRID_BASE, "1. Original Images", "b. Testing Set"),
-        "csv_path":  os.path.join(IDRID_BASE, "2. Groundtruths", "b. IDRiD_Disease Grading_Testing Labels.csv"),
-    },
-}
+
+def _build_idrid_splits(idrid_base: str) -> dict:
+    """Build IDRiD split path dicts from a base directory.
+
+    This is a function (not a constant) so that the base can be
+    overridden at runtime via --idrid-base for environments like
+    Kaggle where datasets are mounted under /kaggle/input/.
+    """
+    return {
+        "train": {
+            "image_dir": os.path.join(idrid_base, "1. Original Images", "a. Training Set"),
+            "csv_path":  os.path.join(idrid_base, "2. Groundtruths", "a. IDRiD_Disease Grading_Training Labels.csv"),
+        },
+        "test": {
+            "image_dir": os.path.join(idrid_base, "1. Original Images", "b. Testing Set"),
+            "csv_path":  os.path.join(idrid_base, "2. Groundtruths", "b. IDRiD_Disease Grading_Testing Labels.csv"),
+        },
+    }
+
 
 # IDRiD column names (from the CSV headers)
 IMAGE_COL = "Image name"
@@ -453,6 +468,14 @@ def main() -> None:
         "--output-dir", type=str, default=OUTPUT_DIR,
         help=f"Output directory for GradCAM results (default: {OUTPUT_DIR})"
     )
+    parser.add_argument(
+        "--idrid-base", type=str, default=None,
+        help=(
+            "Override the IDRiD 'B. Disease Grading' base directory. "
+            "Useful on Kaggle where datasets are mounted under /kaggle/input/. "
+            f"Default: {DEFAULT_IDRID_BASE}"
+        ),
+    )
     args = parser.parse_args()
 
     # ---- Setup ----
@@ -462,6 +485,11 @@ def main() -> None:
     logger.info(f"Device: {device}")
     if torch.cuda.is_available():
         logger.info(f"GPU: {torch.cuda.get_device_name(0)}")
+
+    # ---- Resolve IDRiD paths ----
+    idrid_base = args.idrid_base or DEFAULT_IDRID_BASE
+    idrid_splits = _build_idrid_splits(idrid_base)
+    logger.info(f"IDRiD base directory: {idrid_base}")
 
     # ---- Step 1: Train or load model ----
     model_path = args.model_path or BASE_CONFIG["model_save_path"]
@@ -504,7 +532,7 @@ def main() -> None:
     # ---- Step 3: GradCAM on both IDRiD splits ----
     all_results = []
 
-    for split_name, split_paths in IDRID_SPLITS.items():
+    for split_name, split_paths in idrid_splits.items():
         logger.info("=" * 60)
         logger.info(f"STEP 3: GradCAM on IDRiD {split_name.upper()} split")
         logger.info("=" * 60)
