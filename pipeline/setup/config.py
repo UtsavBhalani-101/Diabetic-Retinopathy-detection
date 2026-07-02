@@ -117,6 +117,10 @@ BASE_CONFIG: dict = {
     "class_centroids_save_path": "artifacts/centroids/mean.npy",
     # "mahalanobis_inv_cov_save_path": "artifacts/mahalanobis/inv_cov.npy",
     "test_max_samples": 2000,
+    # ---- GradCAM occlusion experiment paths ----
+    "gradcam_heatmap_save_dir": "artifacts/gradcam_heatmaps/idrid",
+    "umap_save_dir":            "artifacts/umap",
+    "occlusion_top_k_percents": [10, 30],
 }
 
 

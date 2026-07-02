@@ -19,6 +19,7 @@ import os
 import time
 
 import numpy as np
+import wandb
 import torch
 from PIL import Image, ImageDraw, ImageFont
 from torch.utils.data import DataLoader
@@ -146,6 +147,7 @@ def run_full_gradcam_on_split(
     image_dir: str,
     csv_path: str,
     output_dir: str,
+    heatmap_save_dir: str | None = None,
 ) -> list[dict]:
     """
     Run GradCAM++ on EVERY image in a single IDRiD split.
@@ -155,6 +157,10 @@ def run_full_gradcam_on_split(
                          all predictions and ground-truth labels.
       Pass 2 (per-image): Individual GradCAM computation, overlay,
                           annotation, and save to success/failure folder.
+                          If heatmap_save_dir is provided, raw grayscale
+                          heatmaps are also saved as .npy files (one per
+                          image, named by dataset index) and uploaded to
+                          W&B as an artifact for the occlusion experiment.
 
     This two-pass design is necessary because GradCAM requires
     per-image gradient computation (can't be meaningfully batched),
@@ -255,6 +261,15 @@ def run_full_gradcam_on_split(
     os.makedirs(success_dir, exist_ok=True)
     os.makedirs(failure_dir, exist_ok=True)
 
+    # Heatmap .npy directory (only created when heatmap_save_dir is provided)
+    split_heatmap_dir = None
+    if heatmap_save_dir is not None:
+        split_heatmap_dir = os.path.join(heatmap_save_dir, split_name)
+        os.makedirs(split_heatmap_dir, exist_ok=True)
+        logger.info(
+            f"[IDRiD-{split_name}] Raw heatmaps will be saved to: {split_heatmap_dir}"
+        )
+
     results = []
     start_time = time.time()
 
@@ -279,7 +294,12 @@ def run_full_gradcam_on_split(
         targets = [ClassifierOutputTarget(pred_label)]
         model.eval()
         grayscale_cam = cam(input_tensor=input_tensor, targets=targets)
-        grayscale_cam = grayscale_cam[0, :]  # [H, W]
+        grayscale_cam = grayscale_cam[0, :]  # [H, W]  — values in [0, 1]
+
+        # --- Save raw heatmap as .npy (for occlusion experiment) ---
+        if split_heatmap_dir is not None:
+            npy_path = os.path.join(split_heatmap_dir, f"{idx}.npy")
+            np.save(npy_path, grayscale_cam)
 
         # --- Overlay heatmap on original image ---
         visualization = show_cam_on_image(rgb_img, grayscale_cam, use_rgb=True)
@@ -330,6 +350,31 @@ def run_full_gradcam_on_split(
         f"Successes: {success_dir} ({n_correct} images) | "
         f"Failures: {failure_dir} ({n_wrong} images)"
     )
+
+    # --- Upload .npy heatmaps to W&B as an artifact ---
+    if split_heatmap_dir is not None:
+        try:
+            artifact = wandb.Artifact(
+                name=f"gradcam_heatmaps_{split_name}",
+                type="heatmaps",
+                description=(
+                    f"Raw GradCAM++ grayscale heatmaps (.npy) for IDRiD "
+                    f"{split_name} split. Each file is named {{idx}}.npy "
+                    f"where idx matches the dataset row index. "
+                    f"Shape: (224, 224), values in [0, 1]."
+                ),
+            )
+            artifact.add_dir(split_heatmap_dir)
+            wandb.log_artifact(artifact)
+            logger.info(
+                f"[IDRiD-{split_name}] Heatmap artifact logged to W&B: "
+                f"gradcam_heatmaps_{split_name} ({n_images} files)"
+            )
+        except Exception as exc:
+            # W&B upload is best-effort — don't fail the whole run
+            logger.warning(
+                f"[IDRiD-{split_name}] W&B heatmap artifact upload failed: {exc}"
+            )
 
     return results
 
@@ -470,6 +515,15 @@ def main() -> None:
             f"Default: {DEFAULT_IDRID_BASE}"
         ),
     )
+    parser.add_argument(
+        "--heatmap-dir", type=str, default=None,
+        help=(
+            "If provided, raw GradCAM++ heatmaps are saved as .npy files "
+            "under this directory (one sub-folder per split) and uploaded "
+            "to W&B as an artifact. Required for the occlusion experiment. "
+            "Example: artifacts/gradcam_heatmaps/idrid"
+        ),
+    )
     args = parser.parse_args()
 
     # ---- Setup ----
@@ -538,6 +592,7 @@ def main() -> None:
             image_dir=split_paths["image_dir"],
             csv_path=split_paths["csv_path"],
             output_dir=args.output_dir,
+            heatmap_save_dir=args.heatmap_dir,  # None → no .npy saving
         )
         all_results.extend(split_results)
 
