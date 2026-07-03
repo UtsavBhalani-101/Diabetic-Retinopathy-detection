@@ -1,29 +1,26 @@
 # pipeline/data/occluded_dataset.py
 # ============================================================
-# OccludedDataset:
-#   Wraps an existing RetinopathyDataset and applies a GradCAM-based
-#   percentile occlusion mask to each image tensor before returning it.
+# Two occlusion dataset wrappers for the GradCAM experiment:
 #
-#   Used by the 3-pass occlusion experiment:
-#     Pass 1  — base RetinopathyDataset (no occlusion)
-#     Pass 2  — OccludedDataset(base, top_k_percent=10)
-#     Pass 3  — OccludedDataset(base, top_k_percent=30)
+#   OccludedDataset       — GradCAM-guided occlusion
+#     Masks the top-K% highest-activation pixels from a pre-saved
+#     GradCAM++ heatmap.  Used for Passes 2 & 3.
 #
-# Masking logic
-# -------------
-# For a given image index `idx`:
-#   1. Load the pre-saved GradCAM++ heatmap: {heatmap_dir}/{idx}.npy
-#      Shape: (H, W), float32 in [0, 1]  (H=W=224 for EfficientNet-B0)
-#   2. Compute threshold = np.percentile(heatmap, 100 - top_k_percent)
-#      e.g. top_k_percent=10 → threshold = 90th percentile value
-#   3. Build boolean mask: pixels where heatmap >= threshold  → True
-#      This guarantees EXACTLY top_k_percent % of pixels are masked.
-#   4. Zero out those pixel positions in all 3 channels of the
-#      already-normalized image tensor.
-#      Setting values to 0.0 in normalized space = replacing with the
-#      ImageNet mean colour (since val_transformer normalises with
-#      mean=[0.485, 0.456, 0.406]), which is the least disruptive
-#      replacement for pixels the model won't use.
+#   RandomOccludedDataset — Random occlusion (control baseline)
+#     Masks a randomly selected K% of pixels with no relation to
+#     the model's attention.  Used for Passes 4 & 5.
+#     Comparing these to GradCAM passes at the same K tells you
+#     whether GradCAM is highlighting truly important regions:
+#       - GradCAM drop >> Random drop  →  GradCAM hotspot is meaningful
+#       - GradCAM drop ≈  Random drop  →  model is using distributed features
+#
+# Masking logic (both classes)
+# ----------------------------
+# Occluded pixels are set to 0.0 in the already-normalized tensor.
+# In the ImageNet-normalized space (mean=[0.485,0.456,0.406],
+# std=[0.229,0.224,0.225]), 0.0 corresponds to replacing the pixel
+# with a value approximately equal to the dataset mean — the least
+# disruptive substitution for pixels the model should ignore.
 # ============================================================
 
 import logging
@@ -103,5 +100,84 @@ class OccludedDataset(Dataset):
         #    image shape: (C, H, W)  — clone to avoid mutating cached tensors
         image = image.clone()
         image[:, mask] = 0.0   # 0.0 in normalized space ≈ ImageNet mean colour
+
+        return image, label
+
+
+class RandomOccludedDataset(Dataset):
+    """
+    Wraps a RetinopathyDataset (or any Dataset returning (image_tensor, label))
+    and applies a **randomly selected** K% pixel occlusion mask per image.
+
+    This serves as the control baseline for the GradCAM occlusion experiment.
+    By occluding the same fraction of pixels as the GradCAM passes but at
+    random locations, we can measure whether GradCAM-guided occlusion causes
+    a disproportionately large confidence drop — which would confirm that
+    GradCAM is highlighting genuinely important regions rather than just any
+    arbitrary region.
+
+    Key interpretation:
+      - GradCAM drop >> Random drop  →  hotspot is meaningfully important
+      - GradCAM drop ≈  Random drop  →  model relies on distributed features;
+                                        GradCAM may be less reliable as an
+                                        explanation
+
+    Parameters
+    ----------
+    base_dataset : Dataset
+        The underlying dataset.  Must return (image_tensor, label) where
+        image_tensor is shape (C, H, W) and already normalized.
+    top_k_percent : float
+        Percentage of pixels to occlude at random.
+        E.g. 10 → randomly select and zero out 10% of all pixels.
+    base_seed : int, optional
+        Base random seed.  The actual seed used per image is
+        ``base_seed + idx`` so the mask for each image is deterministic
+        across runs but different for every image.  Default: 42.
+    """
+
+    def __init__(self, base_dataset: Dataset, top_k_percent: float,
+                 base_seed: int = 42):
+        if not 0 < top_k_percent < 100:
+            raise ValueError(
+                f"top_k_percent must be in (0, 100), got {top_k_percent}"
+            )
+
+        self.base_dataset  = base_dataset
+        self.top_k_percent = top_k_percent
+        self.base_seed     = base_seed
+
+        logger.info(
+            f"RandomOccludedDataset | n={len(base_dataset)} | "
+            f"top_k={top_k_percent}% | base_seed={base_seed}"
+        )
+
+    def __len__(self) -> int:
+        return len(self.base_dataset)
+
+    def __getitem__(self, idx: int):
+        # 1. Get the normalized image tensor and label
+        image, label = self.base_dataset[idx]   # (C, H, W)
+
+        _, H, W = image.shape
+        n_pixels = H * W
+
+        # 2. Compute how many pixels to occlude
+        n_occlude = int(round(n_pixels * self.top_k_percent / 100.0))
+
+        # 3. Pick random pixel positions — deterministic per image via idx seed
+        #    Using base_seed + idx ensures:
+        #      · Same mask every time this image is loaded (reproducible)
+        #      · Different mask for every image (no spatial bias)
+        rng = np.random.default_rng(seed=self.base_seed + idx)
+        flat_indices = rng.choice(n_pixels, size=n_occlude, replace=False)
+
+        # 4. Convert flat indices to (row, col) positions
+        rows = flat_indices // W
+        cols = flat_indices  % W
+
+        # 5. Zero out all 3 channels at those locations
+        image = image.clone()
+        image[:, rows, cols] = 0.0   # 0.0 in normalized space ≈ ImageNet mean
 
         return image, label

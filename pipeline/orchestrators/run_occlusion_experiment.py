@@ -1,6 +1,6 @@
 # pipeline/orchestrators/run_occlusion_experiment.py
 # ============================================================
-# 3-Pass GradCAM Occlusion + UMAP Experiment on IDRiD
+# 5-Pass GradCAM Occlusion + UMAP Experiment on IDRiD
 #
 # Pipeline:
 #   Step 1  Train on APTOS_2019 (or skip with --skip-train)
@@ -9,17 +9,30 @@
 #             · Forward pass             → probs, logits, features [N, 1280]
 #             · Metrics: QWK, entropy, confusion matrix
 #             · UMAP of features         → saved + logged to W&B
-#   Step 3  Pass 2 — Top 10% occluded
-#             · OccludedDataset loads saved heatmaps, zeros top 10% pixels
-#             · Forward pass             → probs, logits, features
-#             · Metrics + per-image probability drop vs Pass 1
-#             · UMAP of features         → saved + logged to W&B
-#   Step 4  Pass 3 — Top 30% occluded
-#             · Same as Step 3 but top 30% pixels zeroed
-#   Step 5  Comparative summary
-#             · 3-panel side-by-side UMAP figure
-#             · Bar chart: mean probability drop (baseline vs top10 vs top30)
+#   Step 3  Pass 2 — GradCAM Top 10% occluded
+#   Step 4  Pass 3 — GradCAM Top 30% occluded
+#   Step 5  Pass 4 — Random 10% occluded  (control baseline)
+#             · RandomOccludedDataset: random K% pixels zeroed, no heatmap
+#             · Same metrics + UMAP as GradCAM passes
+#   Step 6  Pass 5 — Random 30% occluded  (control baseline)
+#   Step 7  Comparative summary
+#             · 5-panel UMAP figure (or 3-panel GradCAM-only)
+#             · Bar chart: GradCAM drop vs Random drop at 10% and 30%
 #             · Summary table printed to log
+#
+#  Key question the random passes answer:
+#    If GradCAM 10% drop > Random 10% drop → model genuinely attends to hotspot
+#    If GradCAM 10% drop ≈ Random 10% drop → model uses distributed features
+#
+# Usage (run from project root on Kaggle/Linux):
+#   python -m pipeline.orchestrators.run_occlusion_experiment
+#   python -m pipeline.orchestrators.run_occlusion_experiment --skip-train
+#   python -m pipeline.orchestrators.run_occlusion_experiment \
+#       --skip-train \
+#       --model-path artifacts/weights/aptos_efficientnet.pth \
+#       --idrid-base "/kaggle/input/.../IDRiD/B. Disease Grading" \
+#       --idrid-split test
+# ============================================================
 #
 # Usage (run from project root on Kaggle/Linux):
 #   python -m pipeline.orchestrators.run_occlusion_experiment
@@ -45,7 +58,7 @@ from dotenv import load_dotenv
 
 from pipeline.setup.config import BASE_CONFIG, setup_logging, setting_gpu, set_seed
 from pipeline.data.dataset import RetinopathyDataset, val_transformer, CLAHEPreprocess
-from pipeline.data.occluded_dataset import OccludedDataset
+from pipeline.data.occluded_dataset import OccludedDataset, RandomOccludedDataset
 from pipeline.training_loop_setup.model import EfficientNetMC
 from pipeline.evaluation.umap_analysis import extract_features, plot_umap, compare_umaps
 from pipeline.orchestrators.run_idrid_gradcam import (
@@ -103,7 +116,7 @@ def _build_occluded_loader(
     top_k_percent: float,
     config: dict,
 ) -> DataLoader:
-    """Wrap base_dataset with OccludedDataset and return a DataLoader."""
+    """Wrap base_dataset with GradCAM-guided OccludedDataset and return a DataLoader."""
     occ_dataset = OccludedDataset(
         base_dataset=base_dataset,
         heatmap_dir=heatmap_dir,
@@ -111,6 +124,28 @@ def _build_occluded_loader(
     )
     return DataLoader(
         occ_dataset,
+        batch_size=config["batch_size"],
+        shuffle=False,
+        num_workers=config["num_workers"],
+        pin_memory=config["pin_memory"],
+        prefetch_factor=config["prefetch_factor"],
+    )
+
+
+def _build_random_occluded_loader(
+    base_dataset: RetinopathyDataset,
+    top_k_percent: float,
+    config: dict,
+    base_seed: int = 42,
+) -> DataLoader:
+    """Wrap base_dataset with RandomOccludedDataset (control baseline) and return a DataLoader."""
+    rand_dataset = RandomOccludedDataset(
+        base_dataset=base_dataset,
+        top_k_percent=top_k_percent,
+        base_seed=base_seed,
+    )
+    return DataLoader(
+        rand_dataset,
         batch_size=config["batch_size"],
         shuffle=False,
         num_workers=config["num_workers"],
@@ -233,30 +268,50 @@ def _plot_prob_drop_bar(
     save_path:   str,
 ) -> None:
     """
-    Bar chart showing mean probability drop (confidence reduction) for
-    top-10% and top-30% occlusion relative to the baseline.
+    Grouped bar chart comparing GradCAM-guided vs random occlusion drops.
+
+    Expects labels in the order:
+      ["GradCAM 10%", "GradCAM 30%", "Random 10%", "Random 30%"]
+    Bars are grouped into two pairs so the comparison is visually clear.
+    Falls back to a flat bar chart if fewer than 4 labels are provided.
     """
-    colours = ["#C44E52", "#8172B2"]
-    fig, ax = plt.subplots(figsize=(7, 5))
-    bars = ax.bar(
-        labels, mean_drops,
+    # Colour scheme: GradCAM = warm reds, Random = cool blues
+    colours = ["#C44E52", "#8172B2", "#4C72B0", "#64B5CD"]
+
+    fig, ax = plt.subplots(figsize=(9, 5))
+    x      = range(len(labels))
+    bars   = ax.bar(
+        x, mean_drops,
         color=colours[:len(labels)],
-        width=0.5, edgecolor="white", linewidth=1.2,
+        width=0.55, edgecolor="white", linewidth=1.2,
     )
 
     for bar, val in zip(bars, mean_drops):
         ax.text(
             bar.get_x() + bar.get_width() / 2,
-            bar.get_height() + 0.005,
+            bar.get_height() + 0.003,
             f"{val:.3f}",
-            ha="center", va="bottom", fontsize=11, fontweight="bold",
+            ha="center", va="bottom", fontsize=10, fontweight="bold",
         )
 
+    ax.set_xticks(list(x))
+    ax.set_xticklabels(labels, fontsize=10)
     ax.set_ylabel("Mean Probability Drop\n(baseline confidence − occluded confidence)", fontsize=10)
-    ax.set_title("Confidence Drop Under GradCAM Occlusion (IDRiD)", fontsize=12, fontweight="bold")
-    ax.set_ylim(0, max(mean_drops) * 1.25 if mean_drops else 0.5)
+    ax.set_title(
+        "GradCAM-Guided vs Random Occlusion: Confidence Drop (IDRiD)",
+        fontsize=12, fontweight="bold",
+    )
+    ax.set_ylim(0, max(mean_drops) * 1.3 if mean_drops else 0.5)
     ax.grid(axis="y", linewidth=0.5, alpha=0.6)
     ax.spines[["top", "right"]].set_visible(False)
+
+    # Vertical separator between GradCAM and Random groups (when 4 bars)
+    if len(labels) == 4:
+        ax.axvline(x=1.5, color="grey", linestyle="--", linewidth=0.8, alpha=0.7)
+        ax.text(0.5, ax.get_ylim()[1] * 0.97, "GradCAM",
+                ha="center", fontsize=9, color="#C44E52", fontweight="bold")
+        ax.text(2.5, ax.get_ylim()[1] * 0.97, "Random (control)",
+                ha="center", fontsize=9, color="#4C72B0", fontweight="bold")
 
     plt.tight_layout()
     os.makedirs(os.path.dirname(save_path) if os.path.dirname(save_path) else ".", exist_ok=True)
@@ -482,12 +537,63 @@ def main() -> None:
             umap_titles.append(f"Pass {pass_num}: Top {top_k}% Occluded")
             pass_metrics.append(occ_metrics)
 
-        # ── Step 5: Comparative summary ─────────────────────
+        # ── Random occlusion passes (control baseline) ────────
+        rand_metrics_by_k = {}   # {top_k: metrics_dict}
+        for top_k in top_k_list:
+            pass_num = top_k_list.index(top_k) + len(top_k_list) + 2
+            logger.info("─" * 50)
+            logger.info(f"PASS {pass_num} | Random {top_k}% Occluded (control) | IDRiD-{split_name}")
+            logger.info("─" * 50)
+
+            rand_loader = _build_random_occluded_loader(
+                base_dataset=base_dataset,
+                top_k_percent=top_k,
+                config=BASE_CONFIG,
+            )
+            rand_results = _run_inference_pass(model, rand_loader, device)
+            rand_metrics = _compute_metrics(rand_results)
+            rand_metrics_by_k[top_k] = rand_metrics
+
+            # Per-image probability drop vs baseline
+            rand_drops   = baseline_results["max_prob"] - rand_results["max_prob"]
+            mean_drop    = float(rand_drops.mean())
+            pct_dropped  = float((rand_drops > 0).mean() * 100)
+
+            logger.info(f"Pass {pass_num} Metrics — IDRiD {split_name.upper()} (Random {top_k}%):")
+            _log_pass_metrics(rand_metrics, f"Pass {pass_num} (Random {top_k}%)", split_name,
+                              f"occlusion/{split_name}/pass{pass_num}_rand{top_k}")
+            logger.info(f"  Mean prob drop vs baseline : {mean_drop:.4f}")
+            logger.info(f"  % images with positive drop: {pct_dropped:.1f}%")
+
+            try:
+                wandb.log({
+                    f"occlusion/{split_name}/rand{top_k}_mean_prob_drop":     mean_drop,
+                    f"occlusion/{split_name}/rand{top_k}_pct_images_dropped": pct_dropped,
+                })
+            except Exception as exc:
+                logger.warning(f"W&B prob drop log failed: {exc}")
+
+            # UMAP for random pass
+            rand_umap_path = os.path.join(umap_dir, split_name, f"umap_rand{top_k}.png")
+            rand_embedding = plot_umap(
+                features=rand_results["features"],
+                labels=rand_results["labels"],
+                title=f"IDRiD {split_name.upper()} — Pass {pass_num}: Random {top_k}% Occluded",
+                save_path=rand_umap_path,
+            )
+            try:
+                wandb.log({
+                    f"umap/{split_name}/pass{pass_num}_rand{top_k}": wandb.Image(rand_umap_path)
+                })
+            except Exception as exc:
+                logger.warning(f"W&B UMAP log failed: {exc}")
+
+        # ── Step 7: Comparative summary ──────────────────────
         logger.info("─" * 50)
-        logger.info(f"STEP 5 | Comparative Summary | IDRiD-{split_name}")
+        logger.info(f"STEP 7 | Comparative Summary | IDRiD-{split_name}")
         logger.info("─" * 50)
 
-        # 3-panel UMAP
+        # 3-panel GradCAM-only UMAP (baseline + 2 GradCAM passes)
         comparison_path = os.path.join(umap_dir, split_name, "umap_comparison_3panel.png")
         compare_umaps(
             embeddings=all_embeddings,
@@ -496,34 +602,68 @@ def main() -> None:
             save_path=comparison_path,
         )
 
-        # Probability drop bar chart (drops relative to baseline)
-        drop_labels = [f"Top {k}%" for k in top_k_list]
-        mean_drops  = []
+        # Grouped bar chart: GradCAM drop vs Random drop at each K
+        # Order: GradCAM 10%, GradCAM 30%, Random 10%, Random 30%
+        bar_drop_labels = []
+        bar_drop_values = []
         for k in top_k_list:
+            # GradCAM drop
             occ_loader_tmp = _build_occluded_loader(
                 base_dataset=base_dataset,
                 heatmap_dir=heatmap_dir,
                 top_k_percent=k,
                 config=BASE_CONFIG,
             )
-            occ_res_tmp  = _run_inference_pass(model, occ_loader_tmp, device)
-            mean_drops.append(float((baseline_results["max_prob"] - occ_res_tmp["max_prob"]).mean()))
+            occ_res_tmp = _run_inference_pass(model, occ_loader_tmp, device)
+            bar_drop_labels.append(f"GradCAM {k}%")
+            bar_drop_values.append(
+                float((baseline_results["max_prob"] - occ_res_tmp["max_prob"]).mean())
+            )
+        for k in top_k_list:
+            # Random drop
+            rand_loader_tmp = _build_random_occluded_loader(
+                base_dataset=base_dataset,
+                top_k_percent=k,
+                config=BASE_CONFIG,
+            )
+            rand_res_tmp = _run_inference_pass(model, rand_loader_tmp, device)
+            bar_drop_labels.append(f"Random {k}%")
+            bar_drop_values.append(
+                float((baseline_results["max_prob"] - rand_res_tmp["max_prob"]).mean())
+            )
 
         bar_path = os.path.join(umap_dir, split_name, "prob_drop_bar.png")
-        _plot_prob_drop_bar(mean_drops, drop_labels, bar_path)
+        _plot_prob_drop_bar(bar_drop_values, bar_drop_labels, bar_path)
 
-        # Summary table
-        logger.info("=" * 60)
+        # Summary table — all 5 passes
+        all_pass_labels  = ["Baseline (no occlusion)"]
+        all_pass_labels += [f"GradCAM {k}%" for k in top_k_list]
+        all_pass_labels += [f"Random {k}% (ctrl)" for k in top_k_list]
+        all_pass_metrics = [baseline_metrics] + pass_metrics[1:] + [
+            rand_metrics_by_k[k] for k in top_k_list
+        ]
+
+        logger.info("=" * 70)
         logger.info(f"FINAL COMPARISON TABLE — IDRiD {split_name.upper()}")
-        logger.info("=" * 60)
+        logger.info("=" * 70)
         logger.info(f"  {'Pass':<30s} {'QWK':>6} {'Confidence':>12} {'Entropy':>10}")
         logger.info("  " + "-" * 62)
-        for label, m in zip(["Baseline (no occlusion)"] + drop_labels, pass_metrics):
+        for label, m in zip(all_pass_labels, all_pass_metrics):
             logger.info(
                 f"  {label:<30s} {m['qwk']:>6.4f} "
                 f"{m['mean_confidence']:>12.4f} {m['mean_entropy']:>10.4f}"
             )
-        logger.info("=" * 60)
+        logger.info("=" * 70)
+        logger.info("")
+        logger.info("  KEY COMPARISON (GradCAM drop vs Random drop):")
+        logger.info(f"  {'K':>5}   {'GradCAM drop':>14}   {'Random drop':>12}   {'Ratio (G/R)':>13}")
+        logger.info("  " + "-" * 52)
+        for k in top_k_list:
+            g_drop = bar_drop_values[top_k_list.index(k)]
+            r_drop = bar_drop_values[len(top_k_list) + top_k_list.index(k)]
+            ratio  = g_drop / r_drop if r_drop > 0 else float("inf")
+            logger.info(f"  {k:>4}%   {g_drop:>14.4f}   {r_drop:>12.4f}   {ratio:>13.2f}x")
+        logger.info("=" * 70)
 
     wandb.finish()
     logger.info("run_occlusion_experiment.py complete.")
