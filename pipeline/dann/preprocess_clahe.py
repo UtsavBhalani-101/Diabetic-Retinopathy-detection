@@ -104,8 +104,10 @@ def apply_clahe_gpu(
     3. kornia.enhance.equalize_clahe  (CUDA kernel, parallel over all pixels)
     4. GPU tensor → CPU numpy  [H, W, 3]  uint8
     """
-    # 1. Load
-    img_np = np.array(Image.open(img_path).convert("RGB"), dtype=np.float32) / 255.0
+    # 1. Load and resize to training resolution (224x224) to match train inputs
+    # and bypass massive CPU disk/encode overhead on multi-megapixel images.
+    img_pil = Image.open(img_path).convert("RGB").resize((224, 224), Image.Resampling.BILINEAR)
+    img_np = np.array(img_pil, dtype=np.float32) / 255.0
 
     # 2. → GPU tensor [1, C, H, W]
     img_tensor = (
