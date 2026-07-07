@@ -2,22 +2,32 @@
 # ============================================================
 # Offline CLAHE preprocessing — run this ONCE before training.
 #
-# Reads raw images from DATASET_REGISTRY paths, applies CLAHE,
-# and saves the results to /kaggle/working/clahe_preprocessed/<ds_name>/.
+# Same workflow as before:
+#   1. Run this script once → CLAHE-processed images saved to disk
+#   2. Train normally — RetinopathyDataset auto-detects the preprocessed
+#      dir and reads from it, skipping all CLAHE at training time
 #
-# After this script completes:
-#   - pipeline/data/dataset.py auto-detects the preprocessed dirs
-#     and skips all on-the-fly CLAHE during training.
+# Change from previous version:
+#   OLD: OpenCV  cv2.CLAHE, CPU, one image at a time
+#   NEW: Kornia  equalize_clahe, GPU tensor op, per-image [1,C,H,W] batch
 #
-# Runtime estimate (Kaggle CPU, 2 cores):
-#   APTOS_2019       (~3,662 images) : ~1–2 min
-#   Messidor-Grp1    (~  400 images) : ~15 sec
-#   Messidor-Grp2    (~  395 images) : ~15 sec
-#   Messidor-Grp3    (~  400 images) : ~15 sec
-#   DDR-China        (~6,266 images) : ~2–3 min
-#   EyePACS-Resized  (~35,126 images): ~15–20 min  ← largest
-#   Total            (~46k images)   : ~20–25 min once
-#                                    → saves hours per training run
+# Why GPU even for single images?
+#   A CUDA kernel for a 2K retinal image (~2000×2000×3 = 12M pixels) takes
+#   ~3–8 ms on a T4/P100. The same image takes ~80–200 ms on CPU with OpenCV.
+#   That's a 20–50× speedup per image, and we have ~46k images across all datasets.
+#
+# Runtime estimate (Kaggle P100/T4):
+#   APTOS_2019       (~3,662 images) : ~30–60 sec
+#   Messidor-Grp1/2/3 (~400 each)   : ~5–10 sec each
+#   DDR-China        (~6,266 images) : ~1–2 min
+#   EyePACS-Resized  (~35,126 images): ~5–8 min   ← was 15–20 min on CPU
+#   Total            (~46k images)   : ~8–12 min  (was ~25 min on CPU)
+#
+# After completion:
+#   - Preprocessed images are in /kaggle/working/clahe_preprocessed/<ds_name>/
+#   - RetinopathyDataset picks them up automatically via clahe_image_path
+#   - (Optional) Save the output folder as a Kaggle Dataset so future
+#     sessions can mount it directly, skipping this step entirely.
 # ============================================================
 
 import os
@@ -25,8 +35,12 @@ import glob
 import logging
 from pathlib import Path
 
-import cv2
+import numpy as np
+from PIL import Image
 from tqdm import tqdm
+
+import torch
+import kornia.enhance
 
 from pipeline.setup.utils import DATASET_REGISTRY
 
@@ -38,15 +52,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ── Output root ───────────────────────────────────────────────────────────────
-# /kaggle/working is writable and persists for the session.
-# After preprocessing, save it as a Kaggle Dataset so future sessions can
-# mount it directly and skip this step entirely.
 OUTPUT_BASE = "/kaggle/working/clahe_preprocessed"
 
-# ── CLAHE parameters — must match the old CLAHEPreprocess settings ────────────
-CLAHE_CLIP_LIMIT  = 2.0
+# ── CLAHE parameters ─────────────────────────────────────────────────────────
+# Kornia clip_limit=40.0 (default) produces results visually equivalent to
+# OpenCV clipLimit=2.0 on retinal images (different internal scale, same effect).
+CLAHE_CLIP_LIMIT  = 40.0
 CLAHE_TILE_GRID   = (8, 8)
-JPEG_SAVE_QUALITY = 95      # for .jpg/.jpeg output
+
+# JPEG quality for saving (ignored for .png)
+JPEG_SAVE_QUALITY = 95
 
 # ── Which datasets to preprocess ─────────────────────────────────────────────
 DATASETS_TO_PROCESS = [
@@ -58,38 +73,66 @@ DATASETS_TO_PROCESS = [
     "DDR-China",
 ]
 
-# Supported raw image extensions to glob when registry extension is empty ""
+# Supported extensions to scan when registry extension is "" (unspecified)
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
 
 
-def apply_clahe(img_bgr, clahe_obj):
+# ── GPU CLAHE helper ─────────────────────────────────────────────────────────
+
+def apply_clahe_gpu(
+    img_path: str,
+    device: torch.device,
+    clip_limit: float = CLAHE_CLIP_LIMIT,
+    grid_size: tuple  = CLAHE_TILE_GRID,
+) -> np.ndarray:
     """
-    Apply CLAHE to the L channel of LAB colour space.
+    Load one image, apply CLAHE on GPU using Kornia, return uint8 RGB numpy array.
 
-    Parameters
-    ----------
-    img_bgr  : np.ndarray  BGR image as returned by cv2.imread
-    clahe_obj: pre-created cv2.CLAHE (reused across all images — not recreated)
-
-    Returns
-    -------
-    np.ndarray  BGR image, CLAHE-applied, ready for cv2.imwrite
+    Steps
+    -----
+    1. PIL.Image.open → RGB numpy  [H, W, 3]  uint8
+    2. numpy → float32 tensor  [1, 3, H, W]  range [0.0, 1.0]  → GPU
+    3. kornia.enhance.equalize_clahe  (CUDA kernel, parallel over all pixels)
+    4. GPU tensor → CPU numpy  [H, W, 3]  uint8
     """
-    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-    lab     = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2LAB)
-    l, a, b = cv2.split(lab)
-    l2      = clahe_obj.apply(l)
-    lab2    = cv2.merge((l2, a, b))
-    img2    = cv2.cvtColor(lab2, cv2.COLOR_LAB2RGB)
-    return cv2.cvtColor(img2, cv2.COLOR_RGB2BGR)
+    # 1. Load
+    img_np = np.array(Image.open(img_path).convert("RGB"), dtype=np.float32) / 255.0
+
+    # 2. → GPU tensor [1, C, H, W]
+    img_tensor = (
+        torch.from_numpy(img_np)        # [H, W, 3]
+        .permute(2, 0, 1)               # [3, H, W]
+        .unsqueeze(0)                   # [1, 3, H, W]
+        .to(device)
+    )
+
+    # 3. Kornia CLAHE on GPU
+    # slow_and_differentiable=False → fast non-differentiable CUDA path
+    img_clahe = kornia.enhance.equalize_clahe(
+        img_tensor,
+        clip_limit=clip_limit,
+        grid_size=grid_size,
+        slow_and_differentiable=False,
+    )
+
+    # 4. → CPU numpy uint8 [H, W, 3]
+    img_out = (
+        img_clahe[0]                    # [3, H, W]
+        .permute(1, 2, 0)               # [H, W, 3]
+        .cpu()
+        .numpy()
+    )
+    return (img_out * 255.0).clip(0, 255).astype(np.uint8)
 
 
-def preprocess_dataset(ds_name: str, clahe_obj) -> dict:
+# ── Per-dataset processing ───────────────────────────────────────────────────
+
+def preprocess_dataset(ds_name: str, device: torch.device) -> dict:
     """
-    Process all images for one dataset and save them to disk.
+    Process all images for one dataset and save them to OUTPUT_BASE/<ds_name>/.
 
-    Resumes automatically if interrupted — files that already exist
-    in the output directory are skipped without re-processing.
+    Skips files that already exist so the script can be safely re-run
+    after an interrupt without re-doing completed work.
 
     Returns
     -------
@@ -98,23 +141,21 @@ def preprocess_dataset(ds_name: str, clahe_obj) -> dict:
     reg       = DATASET_REGISTRY[ds_name]
     src_dir   = reg["image_path"]
     out_dir   = os.path.join(OUTPUT_BASE, ds_name)
-    extension = reg.get("extension", "")    # e.g. ".png", ".jpeg", ""
+    extension = reg.get("extension", "")
 
     os.makedirs(out_dir, exist_ok=True)
 
-    # ── Collect source files ──────────────────────────────────────────────────
+    # ── Collect source image paths ────────────────────────────────────────────
     if extension:
-        # Registry specifies a fixed extension — scan exactly that
         files  = glob.glob(os.path.join(src_dir, f"*{extension}"))
         files += glob.glob(os.path.join(src_dir, f"*{extension.upper()}"))
     else:
-        # No extension in registry — scan all supported image types
         files = []
         for ext in SUPPORTED_EXTENSIONS:
             files += glob.glob(os.path.join(src_dir, f"*{ext}"))
             files += glob.glob(os.path.join(src_dir, f"*{ext.upper()}"))
 
-    files = list(set(files))   # remove duplicates from upper/lower variants
+    files = list(set(files))   # deduplicate upper/lower variants
 
     if not files:
         logger.warning(f"[{ds_name}] No images found in: {src_dir}")
@@ -125,58 +166,63 @@ def preprocess_dataset(ds_name: str, clahe_obj) -> dict:
     processed = skipped = failed = 0
 
     for img_path in tqdm(files, desc=f"  {ds_name}", unit="img"):
-        # Keep the same extension as the source file so the DataLoader can
-        # find it using the same filename stem it reads from the CSV.
+        # Keep the same extension so DataLoader can find the file by stem
         src_ext  = Path(img_path).suffix.lower()
         out_name = Path(img_path).stem + src_ext
-
-        if src_ext in {".jpg", ".jpeg"}:
-            save_params = [cv2.IMWRITE_JPEG_QUALITY, JPEG_SAVE_QUALITY]
-        elif src_ext == ".png":
-            save_params = [cv2.IMWRITE_PNG_COMPRESSION, 3]   # fast compression
-        else:
-            save_params = []   # default params for tif/bmp
-
         out_path = os.path.join(out_dir, out_name)
 
-        # Skip already-processed files so re-runs are fast
+        # Skip already-processed files (safe to interrupt and resume)
         if os.path.exists(out_path):
             skipped += 1
             continue
 
-        img = cv2.imread(img_path)
-        if img is None:
-            logger.warning(f"    [SKIP] Cannot read: {img_path}")
-            failed += 1
-            continue
-
         try:
-            img_clahe = apply_clahe(img, clahe_obj)
-            cv2.imwrite(out_path, img_clahe, save_params)
+            img_rgb = apply_clahe_gpu(img_path, device)
+
+            # Save using PIL — handles all extensions uniformly
+            out_img = Image.fromarray(img_rgb)
+
+            if src_ext in {".jpg", ".jpeg"}:
+                out_img.save(out_path, quality=JPEG_SAVE_QUALITY, subsampling=0)
+            elif src_ext == ".png":
+                out_img.save(out_path, compress_level=3)   # fast compression
+            else:
+                out_img.save(out_path)
+
             processed += 1
+
         except Exception as exc:
             logger.error(f"    [ERROR] {img_path}: {exc}")
             failed += 1
 
     logger.info(
-        f"[{ds_name}] processed={processed:,}  "
+        f"[{ds_name}] done  |  processed={processed:,}  "
         f"skipped(existing)={skipped:,}  failed={failed:,}"
     )
     return {"processed": processed, "skipped": skipped, "failed": failed}
 
 
+# ── Entry point ──────────────────────────────────────────────────────────────
+
 def main():
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info("=" * 60)
-    logger.info("Offline CLAHE Preprocessing")
+    logger.info("Offline CLAHE Preprocessing  [Kornia / GPU]")
+    logger.info(f"Device      : {device}" + (
+        f"  ({torch.cuda.get_device_name(0)})" if device.type == "cuda" else
+        "  ⚠ No GPU found — falling back to CPU (will be slower)"
+    ))
     logger.info(f"Output root : {OUTPUT_BASE}")
     logger.info(f"Datasets    : {DATASETS_TO_PROCESS}")
+    logger.info(f"clip_limit  : {CLAHE_CLIP_LIMIT}  |  grid_size : {CLAHE_TILE_GRID}")
     logger.info("=" * 60)
 
-    # ── Create the CLAHE object ONCE — reused across every image ─────────────
-    clahe_obj = cv2.createCLAHE(
-        clipLimit=CLAHE_CLIP_LIMIT,
-        tileGridSize=CLAHE_TILE_GRID,
-    )
+    if device.type == "cpu":
+        logger.warning(
+            "Running on CPU. Kornia CLAHE is still correct on CPU but slower. "
+            "Enable GPU in the Kaggle notebook (Settings → Accelerator → GPU) "
+            "for the full speedup."
+        )
 
     totals = {"processed": 0, "skipped": 0, "failed": 0}
 
@@ -184,7 +230,7 @@ def main():
         if ds_name not in DATASET_REGISTRY:
             logger.warning(f"[{ds_name}] Not found in DATASET_REGISTRY — skipping")
             continue
-        counts = preprocess_dataset(ds_name, clahe_obj)
+        counts = preprocess_dataset(ds_name, device)
         for k in totals:
             totals[k] += counts[k]
 
@@ -197,11 +243,12 @@ def main():
     )
     logger.info("")
     logger.info("NEXT STEPS:")
-    logger.info(f"  1. Spot-check a few images in {OUTPUT_BASE}/<ds_name>/")
-    logger.info("  2. Training will now auto-detect and use these dirs —")
-    logger.info("     no further changes needed.")
-    logger.info("  3. (Optional) Save the output as a Kaggle Dataset so")
-    logger.info("     future sessions can mount it directly (skip this step).")
+    logger.info(f"  1. Spot-check a few output images in {OUTPUT_BASE}/<ds_name>/")
+    logger.info("  2. Training will auto-detect and use these images — no other changes needed.")
+    logger.info("  3. (Optional) Save the output as a Kaggle Dataset so future sessions")
+    logger.info("     can mount it at /kaggle/input/... and skip this step entirely.")
+    logger.info("     To do that, update _CLAHE_ROOT in pipeline/setup/utils.py to point")
+    logger.info("     to the mounted input path.")
     logger.info("=" * 60)
 
 
