@@ -182,16 +182,16 @@ def build_dann_source_loaders(config: dict):
 
 
 # ----------------------------------------------------------------
-# Target loaders  (Messidor-Grp2, Messidor-Grp3 — no labels in loss)
+# Target loaders  (Messidor-Grp2, Messidor-Grp3, IDRiD — no labels in loss)
 # ----------------------------------------------------------------
 
 def build_dann_target_train_loader(config: dict) -> DataLoader:
     """
     Build a combined target DataLoader for the adversarial domain loss.
 
-    All target datasets are merged into one loader.
-    Domain labels are set to 1 (target) — the class_label is present
-    in the batch but ignored during the DANN training loop.
+    All target datasets (Messidor-Grp2, Messidor-Grp3, IDRiD) are merged
+    into one loader. Domain labels are set to 1 (target) — the class_label
+    is present in the batch but ignored during the DANN training loop.
 
     Parameters
     ----------
@@ -252,7 +252,8 @@ def build_dann_target_eval_loader(ds_name: str, config: dict) -> DataLoader:
 
     Parameters
     ----------
-    ds_name : str  — must be a key in DATASET_REGISTRY (e.g. 'Messidor-Grp2')
+    ds_name : str  — must be a key in DATASET_REGISTRY.
+                     Valid target datasets: 'Messidor-Grp2', 'Messidor-Grp3', 'IDRiD'
     config  : dict
 
     Returns

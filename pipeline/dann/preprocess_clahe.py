@@ -55,8 +55,16 @@ logger = logging.getLogger(__name__)
 OUTPUT_BASE = "/kaggle/working/clahe_preprocessed"
 
 # ── CLAHE parameters ─────────────────────────────────────────────────────────
-# Kornia clip_limit=40.0 (default) produces results visually equivalent to
-# OpenCV clipLimit=2.0 on retinal images (different internal scale, same effect).
+# NOTE: "visually equivalent to OpenCV clipLimit=2.0" is NOT independently
+# verified — public reports (Kornia GitHub discussions) show Kornia's
+# equalize_clahe does not numerically match OpenCV's CLAHE even with scaled
+# parameters, and Kornia's own docs only claim its LUT approach "uses the
+# same approach as OpenCV," with an explicit note that this may change
+# between versions. Spot-check a handful of outputs against the old
+# CLAHEPreprocess (OpenCV) results before trusting this preprocessing
+# is equivalent to what your baseline pipeline used — this matters for
+# any downstream claim that DANN's input distribution is comparable to
+# the APTOS-trained baseline's.
 CLAHE_CLIP_LIMIT  = 40.0
 CLAHE_TILE_GRID   = (8, 8)
 
@@ -71,6 +79,7 @@ DATASETS_TO_PROCESS = [
     "Messidor-Grp2",
     "Messidor-Grp3",
     "DDR-China",
+    "IDRiD",         # target domain — needed for domain-adversarial training
 ]
 
 # Supported extensions to scan when registry extension is "" (unspecified)

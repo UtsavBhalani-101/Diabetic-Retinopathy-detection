@@ -30,10 +30,12 @@ DANN_CONFIG: dict = {
         "Messidor-Grp1",
         "DDR-China",
     ],
-    # Target: 2 unlabelled datasets — only used for domain alignment + post-eval
+    # Target: 3 unlabelled datasets — only used for domain alignment + post-eval
+    # IDRiD added: different scanner/protocol/population → harder OOD target
     "target_datasets": [
         "Messidor-Grp2",
         "Messidor-Grp3",
+        "IDRiD",
     ],
 
     # ---- DANN-specific hyperparameters ----

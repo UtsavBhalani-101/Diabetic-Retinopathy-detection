@@ -3,7 +3,7 @@
 # DANN training loop for multi-source → multi-target DR grading.
 #
 # Source domains (labelled):  APTOS, EyePACS, Messidor-Grp1, DDR-China
-# Target domains (unlabelled during training): Messidor-Grp2, Messidor-Grp3
+# Target domains (unlabelled during training): Messidor-Grp2, Messidor-Grp3, IDRiD
 #
 # Loss per batch:
 #   L_total = L_class(source) + λ · L_domain(source + target)
@@ -50,7 +50,7 @@ from pipeline.dann.loaders_dann import (
     build_dann_target_train_loader,
     build_dann_target_eval_loader,
 )
-from pipeline.data.gpu_transforms import gpu_clahe_normalize   # GPU CLAHE + normalize
+from pipeline.data.gpu_transforms import gpu_normalize   # ImageNet normalize only — CLAHE is offline (see preprocess_clahe.py)
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +86,7 @@ def _evaluate_dann(model: DANNEfficientNet,
     with torch.no_grad():
         for images, labels in loader:
             images = images.to(device)
-            images = gpu_clahe_normalize(images)   # CLAHE + normalize on GPU
+            images = gpu_normalize(images)   # normalize only — CLAHE already applied offline
             labels = labels.to(device)
 
             class_logits = model.predict_class(images)   # [B, 5], no domain head
@@ -146,7 +146,7 @@ def _mc_evaluate_dann(model: DANNEfficientNet,
 
             for images, labels in loader:
                 images = images.to(device)
-                images = gpu_clahe_normalize(images)   # CLAHE + normalize on GPU
+                images = gpu_normalize(images)   # normalize only — CLAHE already applied offline
                 logits = model.predict_class(images)    # [B, 5]
                 probs  = torch.softmax(logits, dim=1)   # [B, 5]
                 batch_probs.append(probs.cpu().numpy())
@@ -237,6 +237,12 @@ def train_dann(config: dict) -> float:
         device=device,
     )
 
+    # DESIGN DECISION (confirmed): Cold start from ImageNet weights.
+    # DANN trains the full backbone from scratch on the combined 4-dataset
+    # source pool — aptos_efficientnet.pth is intentionally NOT loaded.
+    # Rationale: avoids confounding the domain-adaptation experiment with
+    # APTOS-specific priors already baked into the backbone; gives DANN a
+    # clean slate to learn source-invariant features via adversarial training.
     model = DANNEfficientNet(
         num_classes=config["num_classes"],
         dropout_rate=config["dropout_rate"],
@@ -317,10 +323,10 @@ def train_dann(config: dict) -> float:
             tgt_imgs, _, _ = next(tgt_iter)
 
             src_imgs   = src_imgs.to(device)
-            src_imgs   = gpu_clahe_normalize(src_imgs)   # CLAHE + normalize on GPU
+            src_imgs   = gpu_normalize(src_imgs)   # normalize only — CLAHE already applied offline
             src_labels = src_labels.to(device)
             tgt_imgs   = tgt_imgs.to(device)
-            tgt_imgs   = gpu_clahe_normalize(tgt_imgs)   # CLAHE + normalize on GPU
+            tgt_imgs   = gpu_normalize(tgt_imgs)   # normalize only — CLAHE already applied offline
 
             # Compute current λ
             p   = global_step / max(total_steps - 1, 1)
@@ -349,7 +355,14 @@ def train_dann(config: dict) -> float:
             domain_loss = domain_criterion(dom_logits, dom_labels)
 
             # ---- Total loss ----
-            total_loss = class_loss + lam * domain_loss
+            # NOTE: lam is NOT reapplied here. The GRL already scales the
+            # backbone-bound gradient by -lam (passed as `alpha=lam` above).
+            # Multiplying domain_loss by lam again here would double-apply
+            # the schedule for the backbone (lam^2 effective) while the
+            # domain head itself only sees a single lam — an asymmetry not
+            # in the original Ganin et al. (2016) formulation. Loss stays
+            # unweighted; λ lives in the GRL only.
+            total_loss = class_loss + domain_loss
 
             total_loss.backward()
             optimizer.step()
@@ -571,7 +584,7 @@ def train_dann(config: dict) -> float:
     with torch.no_grad():
         for images, labels in src_val_loader:
             images = images.to(device)
-            images = gpu_clahe_normalize(images)   # CLAHE + normalize on GPU
+            images = gpu_normalize(images)   # normalize only — CLAHE already applied offline
             feats  = model.get_features(images)   # [B, 1280]
             train_features.append(feats.cpu().numpy())
             train_labels_list.extend(labels.numpy())
