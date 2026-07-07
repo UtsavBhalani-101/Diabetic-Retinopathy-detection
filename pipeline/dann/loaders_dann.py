@@ -114,6 +114,7 @@ def build_dann_source_loaders(config: dict):
             label_col=diag_col,
             transforms=train_transformer,
             extension=reg["extension"],
+            clahe_image_path=reg.get("clahe_image_path"),   # offline CLAHE dir
         )
         train_datasets.append(DANNDataset(train_base, domain_id=0))
         combined_train_dfs.append(train_df)
@@ -126,6 +127,7 @@ def build_dann_source_loaders(config: dict):
             label_col=diag_col,
             transforms=val_transformer,
             extension=reg["extension"],
+            clahe_image_path=reg.get("clahe_image_path"),   # offline CLAHE dir
         )
         val_datasets.append(val_base)
 
@@ -216,6 +218,7 @@ def build_dann_target_train_loader(config: dict) -> DataLoader:
             label_col=diag_col,
             transforms=val_transformer,   # no augmentation on target
             extension=reg["extension"],
+            clahe_image_path=reg.get("clahe_image_path"),   # offline CLAHE dir
         )
         target_datasets.append(DANNDataset(base, domain_id=1))
 
@@ -270,6 +273,7 @@ def build_dann_target_eval_loader(ds_name: str, config: dict) -> DataLoader:
         transforms=val_transformer,
         extension=reg["extension"],
         num_samples=config.get("test_max_samples"),
+        clahe_image_path=reg.get("clahe_image_path"),       # offline CLAHE dir
     )
 
     loader = DataLoader(
