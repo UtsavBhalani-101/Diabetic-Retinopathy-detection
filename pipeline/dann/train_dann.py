@@ -50,6 +50,7 @@ from pipeline.dann.loaders_dann import (
     build_dann_target_train_loader,
     build_dann_target_eval_loader,
 )
+from pipeline.data.gpu_transforms import gpu_clahe_normalize   # GPU CLAHE + normalize
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,7 @@ def _evaluate_dann(model: DANNEfficientNet,
     with torch.no_grad():
         for images, labels in loader:
             images = images.to(device)
+            images = gpu_clahe_normalize(images)   # CLAHE + normalize on GPU
             labels = labels.to(device)
 
             class_logits = model.predict_class(images)   # [B, 5], no domain head
@@ -144,6 +146,7 @@ def _mc_evaluate_dann(model: DANNEfficientNet,
 
             for images, labels in loader:
                 images = images.to(device)
+                images = gpu_clahe_normalize(images)   # CLAHE + normalize on GPU
                 logits = model.predict_class(images)    # [B, 5]
                 probs  = torch.softmax(logits, dim=1)   # [B, 5]
                 batch_probs.append(probs.cpu().numpy())
@@ -314,8 +317,10 @@ def train_dann(config: dict) -> float:
             tgt_imgs, _, _ = next(tgt_iter)
 
             src_imgs   = src_imgs.to(device)
+            src_imgs   = gpu_clahe_normalize(src_imgs)   # CLAHE + normalize on GPU
             src_labels = src_labels.to(device)
             tgt_imgs   = tgt_imgs.to(device)
+            tgt_imgs   = gpu_clahe_normalize(tgt_imgs)   # CLAHE + normalize on GPU
 
             # Compute current λ
             p   = global_step / max(total_steps - 1, 1)
@@ -566,6 +571,7 @@ def train_dann(config: dict) -> float:
     with torch.no_grad():
         for images, labels in src_val_loader:
             images = images.to(device)
+            images = gpu_clahe_normalize(images)   # CLAHE + normalize on GPU
             feats  = model.get_features(images)   # [B, 1280]
             train_features.append(feats.cpu().numpy())
             train_labels_list.extend(labels.numpy())

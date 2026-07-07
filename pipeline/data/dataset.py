@@ -50,24 +50,33 @@ class CLAHEPreprocess:
 
 # ^ -------------------------- transforms --------------------------
 
+# NOTE: CLAHEPreprocess and Normalize are intentionally removed from both
+# transform pipelines. They are now applied on the GPU inside the training
+# loop via gpu_clahe_normalize() from pipeline/data/gpu_transforms.py.
+#
+# CPU transform pipeline now only does cheap work:
+#   Resize → (augmentations) → ToTensor → [0, 1] float32
+#
+# GPU then does:
+#   kornia.enhance.equalize_clahe → (x - mean) / std
+#
+# This eliminates the CPU bottleneck where 4 DataLoader workers were each
+# running OpenCV CLAHE (a CPU-only kernel) and starving the GPU.
+
 val_transformer = transforms.Compose([
-    CLAHEPreprocess(clip_limit=2.0, tile_grid_size=(8, 8)),
     transforms.Resize((224, 224)),
     transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                         std=[0.229, 0.224, 0.225])
+    # CLAHE + Normalize applied on GPU — see pipeline/data/gpu_transforms.py
 ])
 
 train_transformer = transforms.Compose([
-    CLAHEPreprocess(clip_limit=2.0, tile_grid_size=(8, 8)),
     transforms.Resize((224, 224)),
     transforms.RandomHorizontalFlip(),
     transforms.RandomVerticalFlip(),
     transforms.RandomRotation(360),
     transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1, hue=0.05),
     transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                         std=[0.229, 0.224, 0.225])
+    # CLAHE + Normalize applied on GPU — see pipeline/data/gpu_transforms.py
 ])
 
 logger.debug("Train and val transforms defined")
