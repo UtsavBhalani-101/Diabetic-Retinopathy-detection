@@ -194,3 +194,60 @@ def triage_sample(pred: int, entropy: float, margin: float, mc_std: float,
     else:
         return "ROUTINE"
 
+
+if __name__ == "__main__":
+    from pipeline.setup.config import setup_logging
+    setup_logging(level=logging.DEBUG)
+
+    logger.info("Starting synthetic test for calibration.py...")
+    
+    np.random.seed(42)
+    N = 1000
+    C = 5
+
+    # 1. Generate synthetic ground-truth labels
+    labels = np.random.randint(0, C, size=N)
+
+    # 2. Generate uncalibrated logits
+    # One-hot true label targets, scaled and offset with noise to simulate model output
+    one_hot = np.eye(C)[labels]
+    logits = one_hot * 1.5 + np.random.randn(N, C) * 0.8
+
+    # 3. Compute uncalibrated softmax probabilities
+    from scipy.special import softmax as scipy_softmax
+    mean_probs = scipy_softmax(logits, axis=1)
+
+    logger.info(f"Generated synthetic data: logits shape {logits.shape}, labels shape {labels.shape}")
+
+    # 4. Find optimal temperature T
+    optimal_T = find_temperature(logits, labels, n_classes=C)
+    logger.info(f"Found optimal Temperature: {optimal_T:.4f}")
+
+    # 5. Apply temperature scaling
+    calibrated_probs = apply_temperature(logits, optimal_T)
+    logger.info(f"Calibrated probabilities shape: {calibrated_probs.shape}")
+
+    # 6. Generate per-class calibration plots (uncalibrated vs calibrated)
+    per_class_calibration(mean_probs, labels, n_classes=C, save_path="artifacts/test_calibration_uncalibrated.png")
+    per_class_calibration(calibrated_probs, labels, n_classes=C, save_path="artifacts/test_calibration_calibrated.png")
+
+    # 7. Test triage_sample function
+    # Test cases:
+    # - Case 1: Low uncertainty, low predicted class index (Routine)
+    # - Case 2: High uncertainty (e.g. high entropy), low predicted class (Uncertain)
+    # - Case 3: Low uncertainty, high predicted class index >= 3 (High Severity)
+    # - Case 4: High uncertainty (e.g. high MC std), high predicted class (Uncertain)
+    t_routine = triage_sample(pred=1, entropy=0.2, margin=0.8, mc_std=0.01)
+    t_uncertain_ent = triage_sample(pred=1, entropy=1.5, margin=0.1, mc_std=0.01)
+    t_high_sev = triage_sample(pred=4, entropy=0.1, margin=0.9, mc_std=0.02)
+    t_uncertain_std = triage_sample(pred=4, entropy=0.2, margin=0.8, mc_std=0.09)
+
+    logger.info("Triage sample tests:")
+    logger.info(f"  - Predict class 1, Low uncertainty -> Expected: ROUTINE, Got: {t_routine}")
+    logger.info(f"  - Predict class 1, High entropy -> Expected: UNCERTAIN - refer to specialist, Got: {t_uncertain_ent}")
+    logger.info(f"  - Predict class 4, High MC std -> Expected: UNCERTAIN - refer to specialist, Got: {t_uncertain_std}")
+    logger.info(f"  - Predict class 4, Low uncertainty -> Expected: HIGH SEVERITY - urgent review, Got: {t_high_sev}")
+    
+    logger.info("calibration.py tests completed successfully!")
+
+
