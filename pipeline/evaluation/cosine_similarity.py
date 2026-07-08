@@ -51,7 +51,10 @@ def calculate_cosine_similarity(model, loader, device, num_classes,
     with torch.no_grad():
         for images, labels in loader:
             images = images.to(device)
-            features = model.base(images)           # [B, D]
+            if hasattr(model, "get_features"):
+                features = model.get_features(images)
+            else:
+                features = model.base(images)           # [B, D]
             all_features.append(features.cpu().numpy())
             all_labels.extend(labels.numpy())
 

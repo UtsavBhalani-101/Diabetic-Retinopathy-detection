@@ -63,3 +63,23 @@
 - Cosine similarity measures the angle between vectors, ignoring magnitude. By measuring the cosine similarity of OOD samples to the APTOS training centroids, we can see exactly where the features are pointing.
 - this allowed us to confirm the "Directional Feature Corruption" hypothesis: on Messidor, the features for all classes are directionally pulled toward the Class 0 (No DR) centroid (avg similarity **0.5658**), while severe classes collapse near zero (Class 4 at **-0.0088**), causing silent, confident misclassifications.
 - this also explained the "Two-Party System" in DDR and EyePACS, where features are pulled toward the extremes (Class 0 and Class 4) because those classes have robust, visually distinct signatures. Middle classes (1, 2, 3) lose their directional identity and are absorbed by the extremes. For IDRiD on the other hand, the shift was purely benign with stable alignment across all pathological classes (**~0.32-0.44** avg similarity).
+
+### 11. why tested gradcam++ and not gradcam and why even apply at all ?
+- We applied it to find direct visual evidence of *where* the model is looking, as prior experiments showed the model entangles DR-invariant and dataset-specific features, hinting at a texture bias.
+- Standard GradCAM produced diffuse, low-resolution blobs and the heatmaps were spread everywhere. GradCAM++ produces visually sharper heatmaps, though both struggled due to the coarse 7x7 final feature map of EfficientNet-B0.
+- Ultimately, GradCAM++ could not reliably distinguish between correct and incorrect predictions by visual inspection alone, motivating a causal intervention.
+
+### 12. why tested occlusion and what it actually tell us ?
+- Attribution methods like GradCAM only show where gradients concentrate, not what the model actually depends on causally. High-contrast structures can attract gradients without being decision-relevant. Occlusion tests necessity by deleting regions and measuring the performance drop.
+- It told us that the model's decision-relevant signal is diffuse rather than lesion-localized. Removing the GradCAM-highlighted regions hurt performance *less* than removing a random region of the same size. This proves the model does not strictly rely on the localized hot-spots, adding strong evidence to the texture-bias hypothesis.
+
+### 13. Why DANN ?
+- The whole aim for the project was to build a robust DR grading model that is clinically deployable and training only on aptos has kinda reached it's limit on how much improvement can be done so the next step is DANN 
+- With CLAHE fixing the baseline appearance gap (preprocessing destruction), any remaining performance drop and feature shift across domains can be cleanly targeted by Domain Adaptation.
+- DANN directly penalizes the encoder for learning dataset-specific features (like scanner artifacts). This forces the model to disentangle DR-invariant features from domain-specific noise, directly addressing the distribution shift issues identified by Mahalanobis distance and Cosine similarity.
+
+### 14. why the specific split in DANN ?
+    source - aptos, eyepacs, messidor grp 1, ddr
+    target - idrid, messidor grp 2 and 3
+- The source datasets (APTOS, EyePACS, DDR, Messidor G1) are large, diverse datasets that provide a strong, varied foundation for learning DR-invariant clinical features.
+- The target datasets represent specific, challenging domain shifts: IDRiD has a unique "benign shift" (different scanner/population but preserved DR features), and Messidor groups 2/3 represent severe "malignant shift" (directional feature corruption). Aligning the diverse source against these specific targets forces the DANN to bridge the most critical gaps in generalization.

@@ -72,7 +72,10 @@ def extract_features(
     with torch.no_grad():
         for batch_idx, (images, labels) in enumerate(loader):
             images = images.to(device)
-            features = model.base(images)              # [B, 1280]
+            if hasattr(model, "get_features"):
+                features = model.get_features(images)
+            else:
+                features = model.base(images)              # [B, 1280]
             all_features.append(features.cpu().numpy())
             all_labels.extend(labels.numpy())
 

@@ -1,8 +1,6 @@
-# Root directory where preprocess_clahe.py writes its output.
-# RetinopathyDataset checks for <CLAHE_PREPROCESSED_ROOT>/<ds_name>/ at runtime;
-# if it exists the preprocessed images are used, otherwise raw images are used
-# with on-the-fly CLAHE as the fallback (unchanged behaviour).
-_CLAHE_ROOT = "/kaggle/working/clahe_preprocessed"
+# Root directory where preprocess_clahe.py writes its output or where it is mounted.
+# Change this to point to your mounted Kaggle dataset (e.g. /kaggle/input/aptos-clahe-preprocessed)
+_CLAHE_ROOT = "/kaggle/input/aptos-clahe-preprocessed"
 
 DATASET_REGISTRY = {
     "IDRiD": {

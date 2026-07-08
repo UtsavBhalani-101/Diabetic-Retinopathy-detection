@@ -83,3 +83,13 @@
 - **IDRiD (Benign Shift):** Cosine similarity is balanced across classes, meaning the DR-specific features transferred well. The high Mahalanobis distance comes from scanner artifact differences, which increases uncertainty but preserves correct classification. (e.g., IDRiD Class 1, 2, 3, 4 similarities average **0.40**, **0.43**, **0.32**, and **0.34** respectively).
 - **DDR & EyePACS:** These datasets exhibit a "two-party system" where features are pulled toward the extremes (Class 0 and Class 4) because those classes have robust, visually distinct signatures. Middle classes (1, 2, 3) lose their directional identity and are absorbed by the extremes.
 - This confirms that **severity determines feature robustness across domains**. The model's representations for extreme cases survive distribution shift better than those for the ambiguous middle classes.
+
+### 10. Why CLAHE over Ben Graham preprocessing?
+- The Ben Graham preprocessing method, which relies on heavy blurring and subtraction, was found to be adversarial and destructive to the mid-to-low frequency shape features (like large hemorrhages) that the model relies on. 
+- It caused a performance collapse on external datasets (like DDR and Messidor) because it altered the underlying texture profile the EfficientNet-B0 model was heavily relying on (revealing an ImageNet texture bias).
+- CLAHE equalizes contrast without destroying these spatial frequencies. Switching to CLAHE largely preserved performance on external datasets (e.g., DDR QWK jumped from 0.40 to 0.58) and fixed the "Silent Collapse" failure mode where diseased eyes were incorrectly, but confidently, predicted as Class 0 (No DR).
+
+### 11. Are the decision-relevant regions localized to clinical lesions? (GradCAM & Occlusion findings)
+- GradCAM++ produced diffuse, low-resolution activation heatmaps due to the coarse 7x7 final feature map of EfficientNet-B0. It could not visually distinguish correct from incorrect predictions.
+- To test causal necessity, an Occlusion Sensitivity experiment was conducted (targeted occlusion of GradCAM hot-spots vs. random occlusion of equal size). 
+- The result showed that random occlusion degraded performance *more* than targeted occlusion (e.g., at 10% occlusion, QWK dropped to 0.34 with random vs. 0.54 with targeted). This proved that the model's decision-relevant signal is diffuse rather than lesion-localized, strengthening the hypothesis that the model relies on broad signals (like texture or global contrast) rather than strictly localized clinical lesions.

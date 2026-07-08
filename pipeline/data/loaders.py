@@ -57,7 +57,8 @@ def build_loaders_for_training(dataset_name: str, config: dict):
         img_col=reg["image_col"],
         label_col=diag_col,
         transforms=train_transformer,
-        extension=reg["extension"]
+        extension=reg["extension"],
+        clahe_image_path=reg.get("clahe_image_path")
     )
     val_dataset = RetinopathyDataset(
         dataframe=val_df,
@@ -65,7 +66,8 @@ def build_loaders_for_training(dataset_name: str, config: dict):
         img_col=reg["image_col"],
         label_col=diag_col,
         transforms=val_transformer,
-        extension=reg["extension"]
+        extension=reg["extension"],
+        clahe_image_path=reg.get("clahe_image_path")
     )
 
     train_loader = DataLoader(
@@ -124,7 +126,8 @@ def build_loader_for_testing(dataset_name: str, config: dict,
         label_col=reg["diagnosis_col"],
         transforms=val_transformer,
         extension=reg["extension"],
-        num_samples=config.get("test_max_samples")
+        num_samples=config.get("test_max_samples"),
+        clahe_image_path=reg.get("clahe_image_path")
     )
 
     loader = DataLoader(
