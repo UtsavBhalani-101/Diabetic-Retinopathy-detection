@@ -87,7 +87,7 @@ BASE_CONFIG: dict = {
     "optimizer": "adam",
     "lr": 1e-4,
     "loss": "weighted_cross_entropy",
-    "batch_size": 64,
+    "batch_size": 256,
     "seed": 42,
     # ---- calibration / uncertainty ----
     "calibration_measure": "ECE",
