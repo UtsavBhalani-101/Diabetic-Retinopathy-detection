@@ -96,11 +96,13 @@ def train_model(dataset_name: str, config: dict) -> float:
         dropout_rate=config["dropout_rate"],
         pretrained=config.get("pretrained", True)
     )
-
+    # IMPORTANT: wrap with DataParallel BEFORE moving to device.
+    # DataParallel replicates the module on all GPUs and scatters each batch
+    # evenly across them.  The primary device (cuda:0) gathers the results.
+    # Moving to device AFTER wrapping ensures all replicas are initialised correctly.
     if torch.cuda.device_count() > 1:
-        logger.info(f"Using {torch.cuda.device_count()} GPUs with DataParallel!")
+        logger.info(f"Wrapping model with DataParallel across {torch.cuda.device_count()} GPUs")
         model = torch.nn.DataParallel(model)
-
     model = model.to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config["lr"])
@@ -139,6 +141,7 @@ def train_model(dataset_name: str, config: dict) -> float:
         "num_workers":         config["num_workers"],
         "pin_memory":          config["pin_memory"],
         "prefetch_factor":     config["prefetch_factor"],
+        "num_gpus":            torch.cuda.device_count(),
         "device":              (
             torch.cuda.get_device_name(0)
             if torch.cuda.is_available() else "cpu"
@@ -348,14 +351,16 @@ def train_model(dataset_name: str, config: dict) -> float:
     train_features = []
     train_labels_list = []
 
+    # Get the unwrapped base model for direct feature extraction.
+    # We run this on device (GPU 0 only, since it's post-training bookkeeping
+    # on the val set which is small). DataParallel is not used here because
+    # we need the intermediate .base() output, not the final logits.
+    base_model = model.module if isinstance(model, torch.nn.DataParallel) else model
+
     with torch.no_grad():
         for images, labels in val_loader:
             images = images.to(device)
-            
-            # Use unwrapped model to extract base features
-            base_model = model.module if isinstance(model, torch.nn.DataParallel) else model
-            features = base_model.base(images)  # [B, D]
-            
+            features = base_model.base(images)  # [B, D] — runs on cuda:0
             train_features.append(features.cpu().numpy())
             train_labels_list.extend(labels.numpy())
 

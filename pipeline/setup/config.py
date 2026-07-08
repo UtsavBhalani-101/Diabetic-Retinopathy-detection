@@ -87,6 +87,10 @@ BASE_CONFIG: dict = {
     "optimizer": "adam",
     "lr": 1e-4,
     "loss": "weighted_cross_entropy",
+    # batch_size is the TOTAL batch across ALL GPUs.
+    # DataParallel splits this evenly: 256 total / 2 GPUs = 128 per GPU.
+    # Each Kaggle T4 has 15 GiB VRAM — 128 samples of EfficientNet-B0 at
+    # 224x224 uses ~4-5 GiB, well within budget. Raise to 512 if VRAM allows.
     "batch_size": 256,
     "seed": 42,
     # ---- calibration / uncertainty ----
@@ -107,9 +111,11 @@ BASE_CONFIG: dict = {
         "hue": 0.05,
     },
     # ---- dataloader ----
-    "num_workers": 4,
+    # Rule of thumb: 4 workers per GPU.  2 Kaggle GPUs → 8 workers.
+    # This ensures the CPU pipeline never starves the GPUs.
+    "num_workers": 8,
     "pin_memory": True,
-    "prefetch_factor": 2,
+    "prefetch_factor": 4,
     # ---- artifact save paths ----
     "model_save_path": "artifacts/weights/aptos_efficientnet.pth",
     "optimal_T_save_path": "artifacts/calibration/optimal_T.npy",
@@ -154,13 +160,34 @@ UNCERTAINTY_MC_STD_THRESHOLD: float = 0.05
 
 
 def setting_gpu() -> torch.device:
-    """Detect GPU, log name, and return a torch.device."""
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    logger.info(f"Device selected: {device}")
-    if torch.cuda.is_available():
-        logger.info(f"GPU: {torch.cuda.get_device_name(0)}")
-    else:
+    """
+    Detect all available GPUs, log their names and VRAM, and return
+    a torch.device pointing at cuda:0 (DataParallel uses cuda:0 as the
+    primary device and scatters batches to all other visible GPUs).
+    """
+    if not torch.cuda.is_available():
         logger.warning("No GPU found — running on CPU (will be slow for training)")
+        return torch.device("cpu")
+
+    n_gpus = torch.cuda.device_count()
+    device  = torch.device("cuda")   # defaults to cuda:0; DP handles the rest
+
+    logger.info(f"Device selected : {device}")
+    logger.info(f"GPUs available  : {n_gpus}")
+    for i in range(n_gpus):
+        props = torch.cuda.get_device_properties(i)
+        vram_gib = props.total_memory / (1024 ** 3)
+        logger.info(
+            f"  GPU {i}: {props.name} | "
+            f"VRAM={vram_gib:.1f} GiB | "
+            f"SM count={props.multi_processor_count}"
+        )
+
+    if n_gpus > 1:
+        logger.info(
+            f"DataParallel will split each batch across all {n_gpus} GPUs "
+            f"({n_gpus} x {torch.cuda.get_device_name(0)})"
+        )
     return device
 
 
@@ -168,14 +195,29 @@ def setting_gpu() -> torch.device:
 
 
 def set_seed(seed: int = 42) -> None:
-    """Fix all random seeds for full reproducibility."""
+    """
+    Fix all random seeds for reproducibility.
+
+    cuDNN settings:
+      - deterministic=False : allows cuDNN to pick the fastest conv algorithm
+        per input shape.  Setting True forces a single deterministic kernel
+        which is significantly slower and blocks multi-GPU optimisations.
+      - benchmark=True      : cuDNN auto-tunes the best algorithm for your
+        exact input size on first run, then caches it.  This is the main
+        lever for squeezing out GPU throughput with a fixed image size.
+
+    Note: with benchmark=True there is a small amount of non-determinism in
+    conv layers across runs (different kernel choices across platforms), but
+    the seed still makes Python/NumPy/torch ops fully reproducible.
+    """
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    # Allow cuDNN to auto-select the fastest kernel — critical for GPU throughput
+    torch.backends.cudnn.deterministic = False
+    torch.backends.cudnn.benchmark     = True
     logger.debug(f"Random seed fixed: {seed}")
 
 

@@ -79,6 +79,9 @@ def mc_evaluate_full(model, loader, device, T: int = 30):
     all_logits        = []
 
     model.eval()
+    # Activate dropout for MC sampling.
+    # model.modules() recurses into DataParallel's internal module, so this
+    # correctly enables dropout on ALL GPU replicas, not just the wrapper.
     for module in model.modules():
         if isinstance(module, nn.Dropout):
             module.train()   # keep dropout active during inference
@@ -88,21 +91,21 @@ def mc_evaluate_full(model, loader, device, T: int = 30):
         for batch_idx, (images, labels) in enumerate(loader):
             images = images.to(device)
 
-            passes       = []
-            logit_passes = []
+            passes       = []   # T x [batch, C] probs  (numpy)
+            logit_passes = []   # T x [batch, C] logits (numpy)
 
             for _ in range(T):
-                logits = model(images)      # [batch, 5]
-                probs  = torch.softmax(logits, dim=1).cpu().numpy()    # [batch, 5]
+                logits = model(images)                              # [batch, C]
+                probs  = torch.softmax(logits, dim=1).cpu().numpy()
                 passes.append(probs)
-                logit_passes.append(logits.cpu().numpy())       # [batch, 5]
+                logit_passes.append(logits.cpu().numpy())
 
-            passes       = np.array(passes)        # [T, batch, 5]
-            logit_passes = np.array(logit_passes)  # [T, batch, 5]
+            passes       = np.array(passes)        # [T, batch, C]
+            logit_passes = np.array(logit_passes)  # [T, batch, C]
 
-            mean_probs  = passes.mean(axis=0)   # [batch, 5]
-            mean_logits = logit_passes.mean(axis=0)   # [batch, 5]
-            uncertainty = passes.std(axis=0).mean(axis=1)   # [batch, 5]
+            mean_probs  = passes.mean(axis=0)       # [batch, C]
+            mean_logits = logit_passes.mean(axis=0) # [batch, C]
+            uncertainty = passes.std(axis=0).mean(axis=1)  # [batch]
 
             all_mean_probs.append(mean_probs)
             all_uncertainties.append(uncertainty)
