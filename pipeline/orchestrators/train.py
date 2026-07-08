@@ -95,7 +95,13 @@ def train_model(dataset_name: str, config: dict) -> float:
         num_classes=num_classes,
         dropout_rate=config["dropout_rate"],
         pretrained=config.get("pretrained", True)
-    ).to(device)
+    )
+
+    if torch.cuda.device_count() > 1:
+        logger.info(f"Using {torch.cuda.device_count()} GPUs with DataParallel!")
+        model = torch.nn.DataParallel(model)
+
+    model = model.to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config["lr"])
 
@@ -318,13 +324,16 @@ def train_model(dataset_name: str, config: dict) -> float:
     model_path = config.get("model_save_path",     "artifacts/weights/aptos_efficientnet.pth")
     T_path     = config.get("optimal_T_save_path", "artifacts/calibration/optimal_T.npy")
 
-    torch.save(model.state_dict(), model_path)
+    # Save base model state dict (unwrapped if DataParallel)
+    model_state = model.module.state_dict() if isinstance(model, torch.nn.DataParallel) else model.state_dict()
+    
+    torch.save(model_state, model_path)
     np.save(T_path, np.array(optimal_T))
 
     # Backup timestamped weight and T parameters
     backup_model_path = os.path.join(os.path.dirname(model_path), f"aptos_efficientnet_{timestamp}.pth")
     backup_T_path = os.path.join(os.path.dirname(T_path), f"optimal_T_{timestamp}.npy")
-    torch.save(model.state_dict(), backup_model_path)
+    torch.save(model_state, backup_model_path)
     np.save(backup_T_path, np.array(optimal_T))
 
     logger.info(f"Model saved     → {model_path} (Backup: {backup_model_path})")
@@ -342,7 +351,11 @@ def train_model(dataset_name: str, config: dict) -> float:
     with torch.no_grad():
         for images, labels in val_loader:
             images = images.to(device)
-            features = model.base(images)  # [B, D]
+            
+            # Use unwrapped model to extract base features
+            base_model = model.module if isinstance(model, torch.nn.DataParallel) else model
+            features = base_model.base(images)  # [B, D]
+            
             train_features.append(features.cpu().numpy())
             train_labels_list.extend(labels.numpy())
 
