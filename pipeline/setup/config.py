@@ -113,9 +113,9 @@ BASE_CONFIG: dict = {
     # ---- dataloader ----
     # Rule of thumb: 4 workers per GPU.  2 Kaggle GPUs → 8 workers.
     # This ensures the CPU pipeline never starves the GPUs.
-    "num_workers": 8,
+    "num_workers": 4,
     "pin_memory": True,
-    "prefetch_factor": 4,
+    "prefetch_factor": 2,
     # ---- artifact save paths ----
     "model_save_path": "artifacts/weights/aptos_efficientnet.pth",
     "optimal_T_save_path": "artifacts/calibration/optimal_T.npy",
