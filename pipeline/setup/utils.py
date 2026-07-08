@@ -1,7 +1,6 @@
 # Root directory where preprocess_clahe.py writes its output or where it is mounted.
 # Change this to point to your mounted Kaggle dataset (e.g. /kaggle/input/clahe-preprocessed-offline)
-_CLAHE_ROOT = "/kaggle/input/clahe-preprocessed-offline"
-
+_CLAHE_ROOT = "/kaggle/input/datasets/antiti/clahe-preprocessed-offline"
 DATASET_REGISTRY = {
     "IDRiD": {
         "image_path": r"/kaggle/input/datasets/antiti/idrid-testing-dataset/IDRiD/B. Disease Grading/1. Original Images/a. Training Set",
