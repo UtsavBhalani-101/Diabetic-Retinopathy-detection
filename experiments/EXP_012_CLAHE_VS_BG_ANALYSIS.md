@@ -18,9 +18,9 @@ However, the new CLAHE results prove this conclusion was flawed. When we use CLA
 | **APTOS Val** | 0.8631 | **0.8825** | +0.0194 |
 | **IDRiD** | **0.6175** | 0.6091 | -0.0084 |
 | **DDR-China** | 0.4098 | **0.5864** | +0.1766 |
-| **Messidor G1**| 0.3180 | **0.5278** | +0.2098 |
-| **Messidor G2**| 0.2173 | **0.4830** | +0.2657 |
-| **Messidor G3**| 0.3427 | **0.4977** | +0.1550 |
+| **Messidor G1**| 0.3180 | **0.1656** *(was 0.5278²)* | -0.1524 |
+| **Messidor G2**| 0.2173 | **0.4830²³** | +0.2657 |
+| **Messidor G3**| 0.3427 | **0.4977²³** | +0.1550 |
 | **EyePACS** | 0.2620 | **0.4313** | +0.1693 |
 
 ### 2.2 Cosine Similarity Comparison
@@ -63,7 +63,14 @@ Because CLAHE recovers so much performance (e.g., DDR hits 0.58 QWK), the model 
 * **However:** A drop from 0.88 (APTOS) to 0.52-0.58 (Messidor/DDR) still exists. Dataset-specific features are still entangled with DR features, but they do not cause total collapse if the preprocessing is sympathetic (CLAHE).
 
 ### H2 (Distribution Mismatch) & H6 (Label Semantics)
-Under CLAHE, Messidor G1 QWK is **0.5278**, which is substantially lower than IDRiD (**0.6091**) and DDR-China (**0.5864**). 
+> ² All three Messidor CLAHE QWK values are 5-class (computed with a permanently empty
+> row/col 3 from the `{0:0,1:1,2:2,3→4}` label mapping). G1 has been corrected to
+> **0.1656** using `labels=[0,1,2,4]` which excludes the phantom class 3 from the QWK
+> label universe. G2 (0.4830) and G3 (0.4977) **cannot be corrected** — the CLAHE
+> experiment confusion matrices were not recovered from logs.
+> ³ 5-class QWK, uncorrected.
+
+Under CLAHE, Messidor G1 corrected QWK is **0.1656**, which is substantially lower than IDRiD (**0.6091**) and DDR-China (**0.5864**).
 * **Why?** IDRiD and DDR use the exact same 0-4 grading scale as APTOS. Messidor uses a 0-3 scale mapped to 0-4. The performance gap under CLAHE perfectly isolates **H6 (Label Semantics Mismatch)**. Messidor's labels simply do not map cleanly to the APTOS boundaries, artificially suppressing QWK regardless of feature quality.
 
 ### H5: Confidence Region Geometry & Cosine Similarity

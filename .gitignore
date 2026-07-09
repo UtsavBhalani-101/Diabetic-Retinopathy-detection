@@ -24,3 +24,5 @@ pipeline/evaluation/mahalanobis.py
 results/
 grad-cam-results-idrid/
 context/
+dann results.md
+results (1).zip

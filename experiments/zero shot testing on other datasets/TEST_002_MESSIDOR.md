@@ -10,9 +10,17 @@
 ## Performance
 | Metric | APTOS Val | G1 | G2 | G3 |
 |--------|-----------|-----|-----|-----|
-| QWK | 0.87 | 0.49 | 0.42 | 0.37 |
+| QWK (4-class corrected)¹ | 0.87 | **0.2049** | **0.1581** | **0.0689** |
+| QWK (5-class, original logged) | — | 0.4854 | 0.4217 | 0.3706 |
 | Uncertain Fraction | 0.20 | 0.32 | 0.22 | 0.21 |
 | Certain+Wrong | 79 (13%) | 125 (31%) | 144 (36%) | 119 (30%) |
+
+> ¹ **Label-mapping correction.** Messidor uses a 4-class grading scheme (grades 0–3)
+> mapped to APTOS labels `{0:0, 1:1, 2:2, 3→4}` — APTOS class 3 (Severe) is structurally
+> absent in Messidor ground truth (nothing in the mapping produces label 3). Corrected QWK
+> is computed with `cohen_kappa_score(weights='quadratic', labels=[0,1,2,4])`, excluding
+> class 3 from the label universe entirely. The 5-class weight matrix included a phantom
+> class 3 that biased the distance normalization.
 
 ## Failure Pattern
 - Proliferative DR (Class 4) collapses entirely to Class 0 across all groups.
@@ -20,8 +28,8 @@
   Model sees severe Messidor pathology and confidently predicts healthy retina.
 - Class 3 (Severe) row is all zeros in every group — expected, not a bug.
   Messidor has no dedicated Severe DR grade; nothing maps to APTOS Class 3.
-- QWK degrades across groups: G1→G2→G3 (0.49→0.42→0.37).
-  Inter-hospital equipment and protocol variation compounds the base shift.
+- QWK degrades across groups: G1→G2→G3 (0.2049→0.1581→0.0689) on the corrected
+  4-class metric. Inter-hospital equipment and protocol variation compounds the base shift.
 
 ## Uncertainty Behavior
 - Uncertain fraction barely rises above APTOS baseline (0.20→0.32/0.22/0.21).

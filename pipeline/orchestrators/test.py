@@ -38,7 +38,7 @@ from pipeline.evaluation.calibration import (
     per_class_calibration,
     triage_sample
 )
-from pipeline.orchestrators.gradcam_analysis import run_batch_gradcam
+from pipeline.evaluation.umap_analysis import extract_features, plot_umap
 
 logger = logging.getLogger(__name__)
 
@@ -193,6 +193,24 @@ def test_model(dataset_name: str, model_path: str, optimal_T: float,
     per_class_calibration(calibrated_probs, all_labels_arr, save_path=backup_calib_path)
 
     # ------------------------------------------------------------------
+    # 8b. UMAP — feature-space visualisation for this external dataset
+    # ------------------------------------------------------------------
+    logger.info(f"[{dataset_name}] Extracting features for UMAP...")
+    umap_features, umap_labels = extract_features(model, loader, device)
+
+    umap_save_dir = f"artifacts/umap/{dataset_name.replace(' ', '_')}"
+    os.makedirs(umap_save_dir, exist_ok=True)
+    umap_save_path = os.path.join(umap_save_dir, f"umap_{dataset_name.replace(' ', '_')}.png")
+
+    plot_umap(
+        features=umap_features,
+        labels=umap_labels,
+        title=f"Feature Space — {dataset_name} (APTOS-trained model, zero-shot)",
+        save_path=umap_save_path,
+    )
+    logger.info(f"[{dataset_name}] UMAP saved → {umap_save_path}")
+
+    # ------------------------------------------------------------------
     # 9.  Cosine Similarity to Centroids (per-class)
     # ------------------------------------------------------------------
 
@@ -226,26 +244,9 @@ def test_model(dataset_name: str, model_path: str, optimal_T: float,
             class_names=["0", "1", "2", "3", "4"]
         ),
         "test_calibration_plot":    wandb.Image(calib_path),
+        "umap_plot":                wandb.Image(umap_save_path),
     })
 
-    # ------------------------------------------------------------------
-    # 11. Batch Grad-CAM Analysis
-    # ------------------------------------------------------------------
-    logger.info(f"[{dataset_name}] Running Batch Grad-CAM Analysis...")
-    run_batch_gradcam(
-        model=model,
-        dataset=loader.dataset,
-        loader=loader,
-        device=device,
-        dataset_name=dataset_name,
-        img_dir=loader.dataset.img_path,
-        img_col=loader.dataset.img_col,
-        extension=loader.dataset.extension,
-        output_dir="results/gradcam_analysis"
-    )
-
-    wandb.finish()
-    logger.info(f"[{dataset_name}] test_model() complete.")
 
 if __name__ == "__main__":
     setup_wandb()

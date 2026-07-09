@@ -46,7 +46,7 @@
 - the APTOS validation set baseline (avg distance 48.17) is required as a reference — without it, OOD distances are numbers without meaning
 
 ## 9. Why is raw Mahalanobis distance insufficient as an OOD detector ?
-- the key finding from EXP_011: distance does not predict performance. IDRiD has the highest avg distance (103.27) but the best QWK (0.62). Messidor has the lowest avg distance (~92.8) but the worst QWK (0.37-0.49)
+- the key finding from EXP_011: distance does not predict performance. IDRiD has the highest avg distance (103.27) but the best QWK (0.62). Messidor has the lowest avg distance (~92.8) but the worst QWK (0.0689–0.2049, 4-class corrected)
 - reason: the 1280-d feature space entangles two types of features — DR-invariant (vessel density, hemorrhage patterns) and dataset-specific (scanner artifacts, brightness profiles)
 - raw distance measures shift across all dimensions equally. It can't distinguish "far because the scanner looks different" from "far because the DR features are corrupted"
 - IDRiD is far in scanner-artifact dimensions but DR-invariant features survived → classification works despite high distance

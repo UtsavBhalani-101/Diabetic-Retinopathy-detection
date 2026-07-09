@@ -67,7 +67,7 @@
 ### 8. Why doesn't Mahalanobis distance correlate with QWK ?
 - Mahalanobis distance in the 1280-d feature space confirmed all OOD datasets are ~2x the APTOS baseline distance (avg 92-107 vs 48). But the ranking contradicts expectations:
   - IDRiD: highest distance (103.27) → best QWK (0.62)
-  - Messidor: lowest distance (~92.8) → worst QWK (0.37-0.49)
+  - Messidor: lowest distance (~92.8) → worst QWK (0.0689–0.2049, 4-class corrected)
 - the feature space entangles two types of information: DR-invariant features (lesion morphology, vessel patterns) and dataset-specific features (scanner color profiles, brightness, resolution artifacts)
 - distance measures shift across all 1280 dimensions equally — it cannot distinguish a benign shift (scanner artifacts differ but DR features transfer) from a malignant shift (DR-relevant dimensions are corrupted)
 - IDRiD's shift is large but in scanner-artifact dimensions → class separations survive → model is uncertain (0.55 uncertain fraction) but still classifies correctly

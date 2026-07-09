@@ -36,12 +36,12 @@
 
 ### Cross-Reference with QWK and Uncertainty
 
-| Dataset | Avg Distance | QWK | Uncertain Fraction | Certain+Wrong |
-|---------|-------------|-----|-------------------|---------------|
+| Dataset | Avg Distance | QWK (4-class corrected) | Uncertain Fraction | Certain+Wrong |
+|---------|-------------|------------------------|-------------------|---------------|
 | APTOS val | 48.17 | 0.87 | 0.20 | 13% |
-| Messidor G1 | 92.77 | 0.49 | 0.32 | 31% |
-| Messidor G2 | 92.65 | 0.42 | 0.22 | 36% |
-| Messidor G3 | 92.93 | 0.37 | 0.21 | 30% |
+| Messidor G1 | 92.77 | 0.2049 *(was 0.49)* | 0.32 | 31% |
+| Messidor G2 | 92.65 | 0.1581 *(was 0.42)* | 0.22 | 36% |
+| Messidor G3 | 92.93 | 0.0689 *(was 0.37)* | 0.21 | 30% |
 | DDR | 100.63 | 0.54 | 0.30 | 32% |
 | IDRiD | 103.27 | 0.62 | 0.55 | 22% |
 | EyePACS | 106.57 | 0.38 | 0.21 | 21% |
@@ -51,9 +51,9 @@
 
 1. **All OOD datasets are roughly 2x the baseline distance** — avg distances range from 92-107 vs APTOS val at 48. Every external dataset is measurably outside the training distribution. This is expected and confirms the shift.
 
-2. **Messidor groups are internally consistent** — G1/G2/G3 average distances are nearly identical (92.65, 92.77, 92.93) despite QWK varying from 0.49 to 0.37. Inter-hospital performance variation exists even when feature-space distance is the same.
+2. **Messidor groups are internally consistent** — G1/G2/G3 average distances are nearly identical (92.65, 92.77, 92.93) despite corrected QWK varying from 0.0689 to 0.2049. Inter-hospital performance variation exists even when feature-space distance is the same.
 
-3. **Distance does not predict performance** — IDRiD has the second highest avg distance (103.27) but the best QWK (0.62). Messidor has the lowest avg distance (~92.8) but the worst QWK (0.37-0.49). The expected correlation (more distance → worse performance) is broken.
+3. **Distance does not predict performance** — IDRiD has the second highest avg distance (103.27) but the best QWK (0.62). Messidor has the lowest avg distance (~92.8) but the worst QWK (0.0689–0.2049). The expected correlation (more distance → worse performance) is broken.
 
 4. **Distance does correlate with uncertainty detection** — IDRiD's uncertain fraction (0.55) is the highest, and its Certain+Wrong rate (22%) is lower than Messidor's (30-36%). The model correctly signals that IDRiD is unfamiliar. It fails to do so for Messidor.
 
