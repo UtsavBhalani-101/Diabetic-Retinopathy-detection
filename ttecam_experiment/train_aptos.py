@@ -154,9 +154,11 @@ def _build_loaders(args: argparse.Namespace):
 
 
 def _class_weighted_loss(
-    train_df: pd.DataFrame, device: torch.device
+    train_df: pd.DataFrame, device: torch.device, label_col: str = "diagnosis"
 ) -> torch.nn.CrossEntropyLoss:
-    label_col = _APTOS_REG["diagnosis_col"]
+    if label_col not in train_df.columns:
+        reg = DATASET_REGISTRY.get("APTOS_2019", {})
+        label_col = reg.get("diagnosis_col", "diagnosis")
     labels  = train_df[label_col].values
     classes = np.unique(labels)
     weights = compute_class_weight(class_weight="balanced", classes=classes, y=labels)
