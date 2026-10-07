@@ -26,8 +26,13 @@ class TTECAM(nn.Module):
             in_channels=in_channels,
             out_channels=self.num_classes,
             kernel_size=1,
-            bias=model.classifier.bias is not None,
+            bias=False,
         )
+        classifier_bias = model.classifier.bias
+        if classifier_bias is None:
+            self.register_buffer("classifier_bias", None)
+        else:
+            self.register_buffer("classifier_bias", classifier_bias.detach().clone())
         self._copy_classifier_weights()
 
     def _copy_classifier_weights(self) -> None:
@@ -36,8 +41,6 @@ class TTECAM(nn.Module):
                 self.num_classes, -1, 1, 1
             )
             self.class_conv.weight.copy_(weight)
-            if self.model.classifier.bias is not None:
-                self.class_conv.bias.copy_(self.model.classifier.bias.detach())
 
     def forward_maps(self, x: torch.Tensor) -> torch.Tensor:
         """Return class activation maps with shape [B, C, h, w]."""
@@ -47,7 +50,10 @@ class TTECAM(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Return logits recovered by spatially averaging class maps."""
         class_maps = self.forward_maps(x)
-        return class_maps.mean(dim=(2, 3))
+        logits = class_maps.mean(dim=(2, 3))
+        if self.classifier_bias is not None:
+            logits = logits + self.classifier_bias
+        return logits
 
     @torch.no_grad()
     def heatmaps(
@@ -64,6 +70,8 @@ class TTECAM(nn.Module):
         self.eval()
         class_maps = self.forward_maps(x)
         logits = class_maps.mean(dim=(2, 3))
+        if self.classifier_bias is not None:
+            logits = logits + self.classifier_bias
 
         if class_indices is None:
             class_indices = logits.argmax(dim=1)

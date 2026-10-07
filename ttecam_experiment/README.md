@@ -11,7 +11,8 @@ modify any existing pipeline files.
   --batch-size 32 `
   --num-workers 0 `
   --heatmap-dir artifacts/ttecam_heatmaps/idrid/test `
-  --overlay-dir artifacts/ttecam_overlays/idrid/test
+  --overlay-dir artifacts/ttecam_overlays/idrid/test `
+  --heatmap-png-dir artifacts/ttecam_heatmap_pngs/idrid/test
 ```
 
 Outputs:
@@ -19,6 +20,7 @@ Outputs:
 - `artifacts/ttecam_heatmaps/idrid/test/{idx}.npy`
 - `artifacts/ttecam_heatmaps/idrid/test/metadata.csv`
 - `artifacts/ttecam_overlays/idrid/test/{idx}.png`
+- `artifacts/ttecam_heatmap_pngs/idrid/test/{idx}.png`
 
 By default, heatmaps are generated for the model's predicted class. To generate
 true-class maps instead, add:
