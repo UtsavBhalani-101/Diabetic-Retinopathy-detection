@@ -53,10 +53,6 @@ def _project_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-# Pull APTOS image/CSV paths from the shared registry (Kaggle-compatible paths)
-_APTOS_REG = DATASET_REGISTRY["APTOS_2019"]
-
-
 # ─── CLI ────────────────────────────────────────────────────────────────────
 
 def parse_args() -> argparse.Namespace:
@@ -71,6 +67,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--seed",         type=int,   default=42)
     p.add_argument("--device",       default=None,
                    help="Force a device, e.g. 'cpu' or 'cuda'. Auto-detected if omitted.")
+    p.add_argument("--image-dir",    default=None,
+                   help="Override APTOS train image directory.")
+    p.add_argument("--labels-csv",   default=None,
+                   help="Override APTOS train CSV file.")
     p.add_argument("--model-save-path",
                    default="artifacts/weights/aptos_efficientnet.pth")
     p.add_argument("--temperature-save-path",
@@ -85,19 +85,28 @@ def parse_args() -> argparse.Namespace:
 def _build_loaders(args: argparse.Namespace):
     """Stratified 80/20 split of APTOS train.csv → (train_loader, val_loader, train_df).
 
-    Paths come from DATASET_REGISTRY["APTOS_2019"] — the same Kaggle-compatible
-    paths used by the main pipeline. CLAHE is intentionally disabled here
-    (clahe_image_path=None) since the offline preprocessed cache may not exist;
+    Paths come from DATASET_REGISTRY["APTOS_2019"] with fallback to common Kaggle
+    mount points. CLAHE is intentionally disabled here (clahe_image_path=None);
     gpu_normalize handles ImageNet normalization inline during training.
     """
-    csv_path  = _APTOS_REG["target_path"]
-    img_dir   = _APTOS_REG["image_path"]
-    img_col   = _APTOS_REG["image_col"]       # "id_code"
-    label_col = _APTOS_REG["diagnosis_col"]   # "diagnosis"
-    ext       = _APTOS_REG["extension"]       # ".png"
+    reg = DATASET_REGISTRY.get("APTOS_2019", {})
+    csv_path  = args.labels_csv or reg.get("target_path")
+    img_dir   = args.image_dir or reg.get("image_path")
+    img_col   = reg.get("image_col", "id_code")
+    label_col = reg.get("diagnosis_col", "diagnosis")
+    ext       = reg.get("extension", ".png")
+
+    # If registry path doesn't exist, check direct Kaggle input mount
+    alt_csv = "/kaggle/input/aptos2019-blindness-detection/train.csv"
+    alt_img = "/kaggle/input/aptos2019-blindness-detection/train_images"
+    if not args.labels_csv and csv_path and not os.path.exists(csv_path) and os.path.exists(alt_csv):
+        csv_path = alt_csv
+    if not args.image_dir and img_dir and not os.path.exists(img_dir) and os.path.exists(alt_img):
+        img_dir = alt_img
 
     df = pd.read_csv(csv_path).reset_index(drop=True)
     LOGGER.info("APTOS CSV loaded: %d rows from %s", len(df), csv_path)
+    LOGGER.info("APTOS image directory: %s", img_dir)
     LOGGER.info(
         "Class distribution:\n%s",
         df[label_col].value_counts().sort_index().to_string()

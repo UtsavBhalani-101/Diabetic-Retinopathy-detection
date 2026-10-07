@@ -7,8 +7,6 @@ from pathlib import Path
 
 from torch.utils.data import DataLoader
 
-from pipeline.data.occluded_dataset import OccludedDataset, RandomOccludedDataset
-
 from ttecam_experiment.common import (
     add_common_args,
     build_idrid_test_dataset,
@@ -20,6 +18,10 @@ from ttecam_experiment.common import (
     project_root,
     write_results_json,
     write_summary_csv,
+)
+from ttecam_experiment.occlusion_datasets import (
+    HeatmapOccludedDataset,
+    RandomMeanOccludedDataset,
 )
 
 
@@ -106,7 +108,7 @@ def main() -> None:
     summary_rows.append({"condition": "baseline", **baseline})
 
     for top_k in args.top_k:
-        targeted_dataset = OccludedDataset(
+        targeted_dataset = HeatmapOccludedDataset(
             base_dataset=base_dataset,
             heatmap_dir=str(heatmap_dir),
             top_k_percent=top_k,
@@ -131,7 +133,7 @@ def main() -> None:
 
         random_results = []
         for seed in args.random_seeds:
-            random_dataset = RandomOccludedDataset(
+            random_dataset = RandomMeanOccludedDataset(
                 base_dataset=base_dataset,
                 top_k_percent=top_k,
                 base_seed=seed,

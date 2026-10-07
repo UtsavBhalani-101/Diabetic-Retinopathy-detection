@@ -27,6 +27,7 @@ from pipeline.setup.config import (
     UNCERTAINTY_MC_STD_THRESHOLD,
     set_seed,
 )
+from pipeline.setup.utils import DATASET_REGISTRY
 from pipeline.training_loop_setup.model import EfficientNetMC
 
 
@@ -78,17 +79,40 @@ def local_idrid_paths(root: Path) -> dict[str, str]:
 
 
 def build_idrid_test_dataset(args: argparse.Namespace) -> RetinopathyDataset:
-    paths = local_idrid_paths(project_root())
-    image_path = args.image_dir or paths["test_image_path"]
-    target_path = args.labels_csv or paths["test_target_path"]
+    idrid_reg = DATASET_REGISTRY.get("IDRiD", {})
+    image_path = args.image_dir or idrid_reg.get("test_image_path")
+    target_path = args.labels_csv or idrid_reg.get("test_target_path")
+
+    # If not explicitly provided via CLI, and registry paths don't exist, try local workspace fallback
+    if not args.image_dir and (not image_path or not os.path.exists(image_path)):
+        local_paths = local_idrid_paths(project_root())
+        if os.path.exists(local_paths["test_image_path"]):
+            image_path = local_paths["test_image_path"]
+
+    if not args.labels_csv and (not target_path or not os.path.exists(target_path)):
+        local_paths = local_idrid_paths(project_root())
+        if os.path.exists(local_paths["test_target_path"]):
+            target_path = local_paths["test_target_path"]
+        elif not target_path:
+            target_path = local_paths["test_target_path"]
+
+    if not image_path:
+        image_path = local_idrid_paths(project_root())["test_image_path"]
+
+    img_col = idrid_reg.get("image_col") or "Image name"
+    label_col = idrid_reg.get("diagnosis_col") or "Retinopathy grade"
+    extension = idrid_reg.get("extension") or ".jpg"
+
+    LOGGER.info("IDRiD test dataset: image_path=%s", image_path)
+    LOGGER.info("IDRiD test dataset: target_path=%s", target_path)
 
     return RetinopathyDataset(
         img_path=image_path,
         target_path=target_path,
-        img_col=paths["image_col"],
-        label_col=paths["diagnosis_col"],
+        img_col=img_col,
+        label_col=label_col,
         transforms=val_transformer,
-        extension=paths["extension"],
+        extension=extension,
         num_samples=args.max_samples,
         clahe_image_path=None,
     )
@@ -110,7 +134,13 @@ def load_model(args: argparse.Namespace, device: torch.device) -> EfficientNetMC
         dropout_rate=args.dropout_rate,
         pretrained=False,
     )
-    state = torch.load(args.model_path, map_location=device)
+    model_path = Path(args.model_path)
+    if not model_path.is_file():
+        alt = project_root() / args.model_path
+        if alt.is_file():
+            model_path = alt
+    LOGGER.info("Loading model weights from: %s", model_path)
+    state = torch.load(model_path, map_location=device)
     model.load_state_dict(state)
     model.to(device)
     model.eval()
@@ -120,7 +150,13 @@ def load_model(args: argparse.Namespace, device: torch.device) -> EfficientNetMC
 def load_temperature(args: argparse.Namespace) -> float:
     if args.temperature is not None:
         return float(args.temperature)
-    return float(np.load(args.temperature_path))
+    temp_path = Path(args.temperature_path)
+    if not temp_path.is_file():
+        alt = project_root() / args.temperature_path
+        if alt.is_file():
+            temp_path = alt
+    LOGGER.info("Loading temperature scalar from: %s", temp_path)
+    return float(np.load(temp_path))
 
 
 def evaluate_condition(
