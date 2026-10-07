@@ -12,10 +12,12 @@ from typing import Any
 
 import numpy as np
 import torch
+import torch.nn as nn
 from sklearn.metrics import cohen_kappa_score, confusion_matrix
 from torch.utils.data import DataLoader
 
 from pipeline.data.dataset import RetinopathyDataset, val_transformer
+from pipeline.data.gpu_transforms import gpu_normalize
 from pipeline.evaluation.calibration import apply_temperature
 from pipeline.evaluation.evaluate import compute_uncertainty_signals, mc_evaluate_full
 from pipeline.setup.config import (
@@ -29,6 +31,22 @@ from pipeline.training_loop_setup.model import EfficientNetMC
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+class NormalizedModel(nn.Module):
+    """Apply ImageNet normalization before the existing model.
+
+    The dataset returns raw tensors in [0, 1]. The checkpoint was trained with
+    ImageNet normalization, so standalone evaluation must normalize before
+    forwarding through the APTOS model.
+    """
+
+    def __init__(self, model: nn.Module):
+        super().__init__()
+        self.model = model
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.model(gpu_normalize(x))
 
 
 def configure_logging() -> None:
@@ -114,7 +132,7 @@ def evaluate_condition(
     baseline_true_probs: np.ndarray | None = None,
 ) -> dict[str, Any]:
     mean_probs, uncertainties, labels, logits = mc_evaluate_full(
-        model, loader, device, T=mc_passes
+        NormalizedModel(model), loader, device, T=mc_passes
     )
     calibrated_probs = apply_temperature(logits, temperature)
     preds = calibrated_probs.argmax(axis=1)

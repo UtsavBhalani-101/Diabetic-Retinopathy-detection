@@ -10,6 +10,7 @@ import numpy as np
 import torch
 from PIL import Image
 
+from pipeline.data.gpu_transforms import gpu_normalize
 from ttecam_experiment.common import (
     add_common_args,
     build_idrid_test_dataset,
@@ -103,9 +104,10 @@ def main() -> None:
         for images, labels in loader:
             images = images.to(device)
             labels = labels.to(device)
+            normalized_images = gpu_normalize(images)
             class_indices = labels if args.class_source == "true" else None
             heatmaps, logits, selected_classes = ttecam.heatmaps(
-                images,
+                normalized_images,
                 class_indices=class_indices,
                 output_size=(images.shape[-2], images.shape[-1]),
             )
