@@ -291,7 +291,7 @@ def train_softcam(device: torch.device):
         pin_memory=torch.cuda.is_available(),
     )
     if num_workers > 0:
-        loader_kwargs["prefetch_factor"] = 2
+        loader_kwargs["prefetch_factor"] = 4
         loader_kwargs["persistent_workers"] = True
 
     train_loader = DataLoader(train_ds, shuffle=True, **loader_kwargs)
@@ -304,18 +304,10 @@ def train_softcam(device: torch.device):
     base_crit = nn.CrossEntropyLoss(weight=class_weights)
     loss_fn = SoftCAMLoss(base_crit, lambda1=CONFIG["lambda1"], lambda2=CONFIG["lambda2"])
 
-    # Model
-    raw_model = SoftCAMEfficientNet(
+    # Model - SINGLE GPU (DataParallel on T4 is slower due to GIL overhead)
+    model = SoftCAMEfficientNet(
         num_classes=CONFIG["num_classes"], dropout_rate=CONFIG["dropout_rate"], pretrained=True
     ).to(device)
-
-    # Multi-GPU support (utilizes both T4 GPUs on Kaggle)
-    n_gpus = torch.cuda.device_count()
-    if n_gpus > 1:
-        print(f"Detected {n_gpus} GPUs -> enabling torch.nn.DataParallel across all GPUs!")
-        model = nn.DataParallel(raw_model)
-    else:
-        model = raw_model
 
     # cuDNN auto-tuner for fixed 224x224 tensor shapes
     if torch.cuda.is_available():
@@ -325,13 +317,13 @@ def train_softcam(device: torch.device):
     scaler = torch.cuda.amp.GradScaler(enabled=(device.type == "cuda"))
     optimizer = torch.optim.Adam(model.parameters(), lr=CONFIG["lr"], weight_decay=5e-4)
 
-    print(f"\n--- 2. TRAINING FOR {CONFIG['epochs']} EPOCHS (L1={CONFIG['lambda1']}, AMP=True, GPUs={n_gpus}) ---")
+    print(f"\n--- 2. TRAINING FOR {CONFIG['epochs']} EPOCHS (L1={CONFIG['lambda1']}, AMP=True, Single GPU) ---")
     for epoch in range(CONFIG["epochs"]):
         model.train()
         train_loss, train_ce, train_l1 = 0.0, 0.0, 0.0
         for images, targets in train_loader:
-            images = gpu_normalize(images.to(device))
-            targets = targets.to(device)
+            images = gpu_normalize(images.to(device, non_blocking=True))
+            targets = targets.to(device, non_blocking=True)
 
             optimizer.zero_grad()
             with torch.cuda.amp.autocast(enabled=(device.type == "cuda")):
@@ -351,7 +343,7 @@ def train_softcam(device: torch.device):
         val_preds, val_targets = [], []
         with torch.no_grad():
             for images, targets in val_loader:
-                images = gpu_normalize(images.to(device))
+                images = gpu_normalize(images.to(device, non_blocking=True))
                 with torch.cuda.amp.autocast(enabled=(device.type == "cuda")):
                     logits = model(images)
                 val_preds.extend(logits.argmax(dim=1).cpu().numpy())
@@ -371,7 +363,7 @@ def train_softcam(device: torch.device):
     all_logits, all_labels = [], []
     with torch.no_grad():
         for images, targets in val_loader:
-            images = gpu_normalize(images.to(device))
+            images = gpu_normalize(images.to(device, non_blocking=True))
             with torch.cuda.amp.autocast(enabled=(device.type == "cuda")):
                 logits = model(images)
             all_logits.append(logits.float().cpu().numpy())
@@ -390,16 +382,15 @@ def train_softcam(device: torch.device):
             best_t = t
     print(f"Optimal Temperature T = {best_t:.4f}")
 
-    # Save artifacts (unwrap DataParallel)
-    saved_model = model.module if isinstance(model, nn.DataParallel) else model
+    # Save artifacts
     os.makedirs(os.path.dirname(CONFIG["weights_path"]), exist_ok=True)
     os.makedirs(os.path.dirname(CONFIG["temp_path"]), exist_ok=True)
-    torch.save(saved_model.state_dict(), CONFIG["weights_path"])
+    torch.save(model.state_dict(), CONFIG["weights_path"])
     np.save(CONFIG["temp_path"], np.array(best_t))
     print(f"Saved weights -> {CONFIG['weights_path']}")
     print(f"Saved temperature -> {CONFIG['temp_path']}")
 
-    return saved_model, best_t
+    return model, best_t
 
 
 # ==============================================================================
@@ -425,17 +416,17 @@ def generate_heatmaps(model: SoftCAMEfficientNet, idrid_ds: RetinopathyDataset, 
         shuffle=False,
         num_workers=workers,
         pin_memory=torch.cuda.is_available(),
+        persistent_workers=True,
+        prefetch_factor=4,
     )
     offset = 0
-    raw_model = model.module if isinstance(model, nn.DataParallel) else model
-    raw_model.eval()
+    model.eval()
 
     with torch.no_grad():
         for images, labels in loader:
-            images = images.to(device)
-            normalized = gpu_normalize(images)
+            images = gpu_normalize(images.to(device, non_blocking=True))
             with torch.cuda.amp.autocast(enabled=(device.type == "cuda")):
-                heatmaps, logits, selected_classes = raw_model.heatmaps(normalized, output_size=(224, 224))
+                heatmaps, logits, selected_classes = model.heatmaps(images, output_size=(224, 224))
 
             for i in range(images.shape[0]):
                 idx = offset + i
@@ -462,12 +453,14 @@ def evaluate_dataset(model: nn.Module, dataset: Dataset, device: torch.device, t
         shuffle=False,
         num_workers=workers,
         pin_memory=torch.cuda.is_available(),
+        persistent_workers=True,
+        prefetch_factor=4,
     )
     model.eval()
     all_logits, all_labels = [], []
     with torch.no_grad():
         for images, labels in loader:
-            images = gpu_normalize(images.to(device))
+            images = gpu_normalize(images.to(device, non_blocking=True))
             with torch.cuda.amp.autocast(enabled=(device.type == "cuda")):
                 logits = model(images)
             all_logits.append(logits.float().cpu().numpy())
@@ -547,12 +540,16 @@ def run_occlusion_experiment(model: SoftCAMEfficientNet, idrid_ds: RetinopathyDa
 # MAIN ENTRYPOINT
 # ==============================================================================
 if __name__ == "__main__":
+    # Force single GPU mode - DataParallel on T4 is slower due to GIL overhead
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     n_gpus = torch.cuda.device_count()
-    print(f"Device: {device} | Total GPUs available: {n_gpus}")
+    print(f"Device: {device} | GPUs visible: {n_gpus} (forced single GPU mode)")
     if n_gpus > 0:
         for i in range(n_gpus):
             print(f"  GPU {i}: {torch.cuda.get_device_name(i)}")
+    print("  -> Single GPU + AMP + batch_size=64 + 4 workers = optimal T4 throughput")
 
     # Step 1: Train SoftCAM
     model, optimal_t = train_softcam(device)
