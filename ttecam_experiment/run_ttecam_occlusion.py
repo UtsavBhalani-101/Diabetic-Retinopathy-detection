@@ -11,7 +11,7 @@ from ttecam_experiment.common import (
     add_common_args,
     build_idrid_test_dataset,
     build_loader,
-    evaluate_condition,
+    evaluate_condition_deterministic,
     initialize,
     load_model,
     load_temperature,
@@ -96,13 +96,13 @@ def main() -> None:
     }
     summary_rows = []
 
-    baseline = evaluate_condition(
+    baseline = evaluate_condition_deterministic(
         model=model,
         loader=baseline_loader,
         device=device,
-        mc_passes=args.mc_passes,
         temperature=temperature,
     )
+
     results["conditions"]["baseline"] = baseline
     baseline_true_probs = baseline["true_class_probs"]
     summary_rows.append({"condition": "baseline", **baseline})
@@ -113,14 +113,14 @@ def main() -> None:
             heatmap_dir=str(heatmap_dir),
             top_k_percent=top_k,
         )
-        targeted = evaluate_condition(
+        targeted = evaluate_condition_deterministic(
             model=model,
             loader=loader_for_dataset(targeted_dataset, args),
             device=device,
-            mc_passes=args.mc_passes,
             temperature=temperature,
             baseline_true_probs=baseline_true_probs,
         )
+
         targeted_key = f"ttecam_top_{top_k:g}"
         results["conditions"][targeted_key] = targeted
         summary_rows.append(
@@ -138,14 +138,14 @@ def main() -> None:
                 top_k_percent=top_k,
                 base_seed=seed,
             )
-            random_result = evaluate_condition(
+            random_result = evaluate_condition_deterministic(
                 model=model,
                 loader=loader_for_dataset(random_dataset, args),
                 device=device,
-                mc_passes=args.mc_passes,
                 temperature=temperature,
                 baseline_true_probs=baseline_true_probs,
             )
+            
             random_result["seed"] = seed
             random_results.append(random_result)
             summary_rows.append(

@@ -158,6 +158,67 @@ def load_temperature(args: argparse.Namespace) -> float:
     LOGGER.info("Loading temperature scalar from: %s", temp_path)
     return float(np.load(temp_path))
 
+def evaluate_condition_deterministic(
+    model: torch.nn.Module,
+    loader: DataLoader,
+    device: torch.device,
+    temperature: float,
+    baseline_true_probs: np.ndarray | None = None,
+) -> dict[str, Any]:
+    """Single-pass, deterministic evaluation (no MC Dropout).
+
+    Matches the eval-mode, dropout-off forward pass used to generate the
+    TTE-CAM heatmaps (generate_ttecam_heatmaps.py: @torch.no_grad(),
+    self.eval()). mc_evaluate_full forces nn.Dropout into train() mode for
+    T stochastic passes — using it here would rank patches under one
+    forward-pass regime and score them under a different one. This
+    function keeps both regimes matched.
+    """
+    wrapped = NormalizedModel(model)
+    wrapped.eval()
+    for module in wrapped.modules():
+        if isinstance(module, torch.nn.Dropout):
+            module.eval()
+    wrapped.eval()
+
+    all_logits = []
+    all_labels = []
+    with torch.no_grad():
+        for images, labels in loader:
+            images = images.to(device)
+            logits = wrapped(images)
+            all_logits.append(logits.cpu().numpy())
+            all_labels.append(labels.numpy())
+
+    logits = np.concatenate(all_logits, axis=0)
+    labels = np.concatenate(all_labels, axis=0)
+
+    calibrated_probs = apply_temperature(logits, temperature)
+    preds = calibrated_probs.argmax(axis=1)
+    confidences = calibrated_probs.max(axis=1)
+    true_probs = calibrated_probs[np.arange(len(labels)), labels]
+    qwk = cohen_kappa_score(labels, preds, weights="quadratic")
+    matrix = confusion_matrix(labels, preds, labels=[0, 1, 2, 3, 4])
+    correct_mask = preds == labels
+
+    result: dict[str, Any] = {
+        "qwk": float(qwk),
+        "mean_confidence": float(confidences.mean()),
+        "confusion_matrix": matrix.tolist(),
+        "labels": labels.tolist(),
+        "predictions": preds.tolist(),
+        "true_class_probs": true_probs.tolist(),
+        "correct_fraction": float(correct_mask.mean()),
+    }
+
+    if baseline_true_probs is not None:
+        baseline_true_probs = np.asarray(baseline_true_probs, dtype=np.float32)
+        drops = baseline_true_probs - true_probs
+        result["mean_prob_drop_vs_baseline"] = float(drops.mean())
+        result["positive_drop_fraction"] = float((drops > 0).mean())
+
+    return result
+
 
 def evaluate_condition(
     model: torch.nn.Module,
