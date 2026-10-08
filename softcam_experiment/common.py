@@ -249,8 +249,13 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--image-dir", default=None, help="Override IDRiD test image dir.")
     parser.add_argument("--labels-csv", default=None, help="Override IDRiD test CSV.")
-    parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--num-workers", type=int, default=0)
+    parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=min(4, os.cpu_count() or 4),
+        help="DataLoader worker processes (defaults to 4 on Kaggle).",
+    )
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--dropout-rate", type=float, default=BASE_CONFIG["dropout_rate"])
     parser.add_argument("--seed", type=int, default=BASE_CONFIG["seed"])

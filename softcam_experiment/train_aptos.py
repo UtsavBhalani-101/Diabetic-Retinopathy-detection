@@ -49,8 +49,13 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--epochs", type=int, default=10)
     p.add_argument("--lr", type=float, default=1e-4)
-    p.add_argument("--batch-size", type=int, default=32)
-    p.add_argument("--num-workers", type=int, default=0)
+    p.add_argument("--batch-size", type=int, default=64, help="Batch size (64 recommended for 2x T4).")
+    p.add_argument(
+        "--num-workers",
+        type=int,
+        default=min(4, os.cpu_count() or 4),
+        help="DataLoader worker processes (default 4 on Kaggle).",
+    )
     p.add_argument("--dropout-rate", type=float, default=0.3)
     p.add_argument(
         "--lambda1",
@@ -147,6 +152,7 @@ def _build_loaders(args: argparse.Namespace):
     )
     if args.num_workers > 0:
         loader_kwargs["prefetch_factor"] = 2
+        loader_kwargs["persistent_workers"] = True
 
     train_loader = DataLoader(train_ds, shuffle=True, **loader_kwargs)
     val_loader = DataLoader(val_ds, shuffle=False, **loader_kwargs)
@@ -170,7 +176,7 @@ def _class_weighted_loss(
 
 
 def _evaluate(
-    model: SoftCAMEfficientNet,
+    model: torch.nn.Module,
     loader: DataLoader,
     criterion: torch.nn.CrossEntropyLoss,
     device: torch.device,
@@ -185,8 +191,9 @@ def _evaluate(
         for images, labels in loader:
             images = gpu_normalize(images.to(device))
             labels = labels.to(device)
-            logits = model(images)
-            loss = criterion(logits, labels)
+            with torch.cuda.amp.autocast(enabled=(device.type == "cuda")):
+                logits = model(images)
+                loss = criterion(logits, labels)
             total_loss += loss.item()
 
             preds = logits.argmax(dim=1).cpu().numpy()
@@ -202,7 +209,7 @@ def _evaluate(
 
 
 def _mc_logits_and_labels(
-    model: SoftCAMEfficientNet,
+    model: torch.nn.Module,
     loader: DataLoader,
     device: torch.device,
     T: int,
@@ -217,8 +224,9 @@ def _mc_logits_and_labels(
             run_logits: list[np.ndarray] = []
             for images, labels in loader:
                 images = gpu_normalize(images.to(device))
-                logits = model(images)
-                run_logits.append(logits.cpu().numpy())
+                with torch.cuda.amp.autocast(enabled=(device.type == "cuda")):
+                    logits = model(images)
+                run_logits.append(logits.float().cpu().numpy())
                 if pass_idx == 0:
                     labels_collected.extend(labels.numpy().tolist())
             all_logit_runs.append(np.concatenate(run_logits, axis=0))
@@ -243,18 +251,33 @@ def main() -> None:
         if args.device
         else ("cuda" if torch.cuda.is_available() else "cpu")
     )
-    LOGGER.info("Device: %s", device)
+    n_gpus = torch.cuda.device_count()
+    LOGGER.info("Device: %s | Total GPUs available: %d", device, n_gpus)
+    if n_gpus > 0:
+        for i in range(n_gpus):
+            LOGGER.info("  GPU %d: %s", i, torch.cuda.get_device_name(i))
     set_seed(args.seed)
 
     # 1. Data
     train_loader, val_loader, train_df = _build_loaders(args)
 
     # 2. Model & Regularized SoftCAM Loss
-    model = SoftCAMEfficientNet(
+    base_model = SoftCAMEfficientNet(
         num_classes=5,
         dropout_rate=args.dropout_rate,
         pretrained=True,
     ).to(device)
+
+    # Multi-GPU support (e.g. 2x T4 on Kaggle)
+    if n_gpus > 1:
+        LOGGER.info("Enabling torch.nn.DataParallel across %d GPUs!", n_gpus)
+        model = torch.nn.DataParallel(base_model)
+    else:
+        model = base_model
+
+    # cuDNN auto-tuner for fixed 224x224 tensor shapes
+    if torch.cuda.is_available():
+        torch.backends.cudnn.benchmark = True
 
     base_criterion = _class_weighted_loss(train_df, device)
     softcam_loss_fn = SoftCAMLoss(
@@ -263,17 +286,19 @@ def main() -> None:
         lambda2=args.lambda2,
     )
 
+    scaler = torch.cuda.amp.GradScaler(enabled=(device.type == "cuda"))
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=5e-4)
 
     LOGGER.info(
         "SoftCAM params: %d total, %d trainable",
-        sum(p.numel() for p in model.parameters()),
-        sum(p.numel() for p in model.parameters() if p.requires_grad),
+        sum(p.numel() for p in base_model.parameters()),
+        sum(p.numel() for p in base_model.parameters() if p.requires_grad),
     )
     LOGGER.info(
-        "Regularization: lambda1 (L1 Lasso)=%.2e | lambda2 (L2 Ridge)=%.2e",
+        "Regularization: lambda1 (L1 Lasso)=%.2e | lambda2 (L2 Ridge)=%.2e | AMP=%s",
         args.lambda1,
         args.lambda2,
+        device.type == "cuda",
     )
 
     # 3. Training Loop
@@ -292,10 +317,13 @@ def main() -> None:
             labels = labels.to(device)
 
             optimizer.zero_grad()
-            logits, class_maps = model(images, return_maps=True)
-            total_loss, ce_loss, l1_reg, _ = softcam_loss_fn(logits, labels, class_maps)
-            total_loss.backward()
-            optimizer.step()
+            with torch.cuda.amp.autocast(enabled=(device.type == "cuda")):
+                logits, class_maps = model(images, return_maps=True)
+                total_loss, ce_loss, l1_reg, _ = softcam_loss_fn(logits, labels, class_maps)
+
+            scaler.scale(total_loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
 
             running_total_loss += total_loss.item()
             running_ce_loss += ce_loss.item()
@@ -337,11 +365,12 @@ def main() -> None:
     LOGGER.info("Optimal temperature T = %.4f", optimal_T)
     LOGGER.info("Calibrated val QWK    = %.4f", final_qwk)
 
-    # 5. Save Model and Temperature
+    # 5. Save Model and Temperature (unwrap DataParallel)
     model_path = root / args.model_save_path
     T_path = root / args.temperature_save_path
 
-    torch.save(model.state_dict(), model_path)
+    raw_to_save = model.module if isinstance(model, torch.nn.DataParallel) else model
+    torch.save(raw_to_save.state_dict(), model_path)
     np.save(T_path, np.array(optimal_T))
 
     LOGGER.info("SoftCAM model saved -> %s", model_path)

@@ -67,7 +67,8 @@ CONFIG = {
 
     # Hyperparameters
     "epochs": 10,
-    "batch_size": 32,
+    "batch_size": 64,  # Scaled for 2x T4 GPUs (32 per GPU)
+    "num_workers": 4,  # Utilize all 4 Kaggle vCPUs
     "lr": 1e-4,
     "lambda1": 1e-4,   # Lasso sparsity on evidence maps
     "lambda2": 0.0,    # Ridge smoothness
@@ -116,6 +117,14 @@ class RetinopathyDataset(Dataset):
         self.ext = ext
         self.is_train = is_train
 
+        # Pre-extract filenames and labels to plain Python lists
+        # Avoids costly pandas df.iloc[idx] indexing overhead during data loading
+        self.filenames = [
+            str(f) + (self.ext if self.ext and not str(f).endswith(self.ext) else "")
+            for f in self.df[self.img_col]
+        ]
+        self.labels = self.df[self.label_col].astype(int).tolist()
+
         if is_train:
             self.transform = T.Compose([
                 T.Resize((224, 224)),
@@ -131,18 +140,13 @@ class RetinopathyDataset(Dataset):
             ])
 
     def __len__(self) -> int:
-        return len(self.df)
+        return len(self.filenames)
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, int]:
-        row = self.df.iloc[idx]
-        filename = str(row[self.img_col])
-        if self.ext and not filename.endswith(self.ext):
-            filename += self.ext
-        path = os.path.join(self.img_dir, filename)
-
+        path = os.path.join(self.img_dir, self.filenames[idx])
         image = Image.open(path).convert("RGB")
         tensor = self.transform(image)
-        label = int(row[self.label_col])
+        label = self.labels[idx]
         return tensor, label
 
 
@@ -280,8 +284,18 @@ def train_softcam(device: torch.device):
         val_df, img_dir, CONFIG["aptos_img_col"], CONFIG["aptos_label_col"], CONFIG["aptos_ext"], is_train=False
     )
 
-    train_loader = DataLoader(train_ds, batch_size=CONFIG["batch_size"], shuffle=True, num_workers=2, pin_memory=True)
-    val_loader = DataLoader(val_ds, batch_size=CONFIG["batch_size"], shuffle=False, num_workers=2, pin_memory=True)
+    num_workers = CONFIG.get("num_workers", 4)
+    loader_kwargs = dict(
+        batch_size=CONFIG["batch_size"],
+        num_workers=num_workers,
+        pin_memory=torch.cuda.is_available(),
+    )
+    if num_workers > 0:
+        loader_kwargs["prefetch_factor"] = 2
+        loader_kwargs["persistent_workers"] = True
+
+    train_loader = DataLoader(train_ds, shuffle=True, **loader_kwargs)
+    val_loader = DataLoader(val_ds, shuffle=False, **loader_kwargs)
 
     # Class-balanced loss
     labels = train_df[CONFIG["aptos_label_col"]].values
@@ -290,13 +304,28 @@ def train_softcam(device: torch.device):
     base_crit = nn.CrossEntropyLoss(weight=class_weights)
     loss_fn = SoftCAMLoss(base_crit, lambda1=CONFIG["lambda1"], lambda2=CONFIG["lambda2"])
 
-    # Model & Optimizer
-    model = SoftCAMEfficientNet(
+    # Model
+    raw_model = SoftCAMEfficientNet(
         num_classes=CONFIG["num_classes"], dropout_rate=CONFIG["dropout_rate"], pretrained=True
     ).to(device)
+
+    # Multi-GPU support (utilizes both T4 GPUs on Kaggle)
+    n_gpus = torch.cuda.device_count()
+    if n_gpus > 1:
+        print(f"Detected {n_gpus} GPUs -> enabling torch.nn.DataParallel across all GPUs!")
+        model = nn.DataParallel(raw_model)
+    else:
+        model = raw_model
+
+    # cuDNN auto-tuner for fixed 224x224 tensor shapes
+    if torch.cuda.is_available():
+        torch.backends.cudnn.benchmark = True
+
+    # Mixed precision AMP scaler for Turing Tensor Cores
+    scaler = torch.cuda.amp.GradScaler(enabled=(device.type == "cuda"))
     optimizer = torch.optim.Adam(model.parameters(), lr=CONFIG["lr"], weight_decay=5e-4)
 
-    print(f"\n--- 2. TRAINING FOR {CONFIG['epochs']} EPOCHS (L1={CONFIG['lambda1']}) ---")
+    print(f"\n--- 2. TRAINING FOR {CONFIG['epochs']} EPOCHS (L1={CONFIG['lambda1']}, AMP=True, GPUs={n_gpus}) ---")
     for epoch in range(CONFIG["epochs"]):
         model.train()
         train_loss, train_ce, train_l1 = 0.0, 0.0, 0.0
@@ -305,10 +334,13 @@ def train_softcam(device: torch.device):
             targets = targets.to(device)
 
             optimizer.zero_grad()
-            logits, maps = model(images, return_maps=True)
-            total_loss, ce, l1, _ = loss_fn(logits, targets, maps)
-            total_loss.backward()
-            optimizer.step()
+            with torch.cuda.amp.autocast(enabled=(device.type == "cuda")):
+                logits, maps = model(images, return_maps=True)
+                total_loss, ce, l1, _ = loss_fn(logits, targets, maps)
+
+            scaler.scale(total_loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
 
             train_loss += total_loss.item()
             train_ce += ce.item()
@@ -320,7 +352,8 @@ def train_softcam(device: torch.device):
         with torch.no_grad():
             for images, targets in val_loader:
                 images = gpu_normalize(images.to(device))
-                logits = model(images)
+                with torch.cuda.amp.autocast(enabled=(device.type == "cuda")):
+                    logits = model(images)
                 val_preds.extend(logits.argmax(dim=1).cpu().numpy())
                 val_targets.extend(targets.numpy())
 
@@ -339,8 +372,9 @@ def train_softcam(device: torch.device):
     with torch.no_grad():
         for images, targets in val_loader:
             images = gpu_normalize(images.to(device))
-            logits = model(images)
-            all_logits.append(logits.cpu().numpy())
+            with torch.cuda.amp.autocast(enabled=(device.type == "cuda")):
+                logits = model(images)
+            all_logits.append(logits.float().cpu().numpy())
             all_labels.extend(targets.numpy())
     all_logits = np.concatenate(all_logits, axis=0)
     all_labels = np.array(all_labels)
@@ -356,15 +390,16 @@ def train_softcam(device: torch.device):
             best_t = t
     print(f"Optimal Temperature T = {best_t:.4f}")
 
-    # Save artifacts
+    # Save artifacts (unwrap DataParallel)
+    saved_model = model.module if isinstance(model, nn.DataParallel) else model
     os.makedirs(os.path.dirname(CONFIG["weights_path"]), exist_ok=True)
     os.makedirs(os.path.dirname(CONFIG["temp_path"]), exist_ok=True)
-    torch.save(model.state_dict(), CONFIG["weights_path"])
+    torch.save(saved_model.state_dict(), CONFIG["weights_path"])
     np.save(CONFIG["temp_path"], np.array(best_t))
     print(f"Saved weights -> {CONFIG['weights_path']}")
     print(f"Saved temperature -> {CONFIG['temp_path']}")
 
-    return model, best_t
+    return saved_model, best_t
 
 
 # ==============================================================================
@@ -383,18 +418,28 @@ def generate_heatmaps(model: SoftCAMEfficientNet, idrid_ds: RetinopathyDataset, 
     os.makedirs(CONFIG["heatmap_dir"], exist_ok=True)
     os.makedirs(CONFIG["overlay_dir"], exist_ok=True)
 
-    loader = DataLoader(idrid_ds, batch_size=16, shuffle=False)
+    workers = CONFIG.get("num_workers", 4)
+    loader = DataLoader(
+        idrid_ds,
+        batch_size=CONFIG["batch_size"],
+        shuffle=False,
+        num_workers=workers,
+        pin_memory=torch.cuda.is_available(),
+    )
     offset = 0
+    raw_model = model.module if isinstance(model, nn.DataParallel) else model
+    raw_model.eval()
 
     with torch.no_grad():
         for images, labels in loader:
             images = images.to(device)
             normalized = gpu_normalize(images)
-            heatmaps, logits, selected_classes = model.heatmaps(normalized, output_size=(224, 224))
+            with torch.cuda.amp.autocast(enabled=(device.type == "cuda")):
+                heatmaps, logits, selected_classes = raw_model.heatmaps(normalized, output_size=(224, 224))
 
             for i in range(images.shape[0]):
                 idx = offset + i
-                h_np = heatmaps[i].cpu().numpy().astype(np.float32)
+                h_np = heatmaps[i].float().cpu().numpy().astype(np.float32)
                 np.save(os.path.join(CONFIG["heatmap_dir"], f"{idx}.npy"), h_np)
 
                 if idx < 12:  # Save first 12 visual overlays
@@ -410,14 +455,22 @@ def generate_heatmaps(model: SoftCAMEfficientNet, idrid_ds: RetinopathyDataset, 
 
 
 def evaluate_dataset(model: nn.Module, dataset: Dataset, device: torch.device, temp: float) -> dict:
-    loader = DataLoader(dataset, batch_size=16, shuffle=False)
+    workers = CONFIG.get("num_workers", 4)
+    loader = DataLoader(
+        dataset,
+        batch_size=CONFIG["batch_size"],
+        shuffle=False,
+        num_workers=workers,
+        pin_memory=torch.cuda.is_available(),
+    )
     model.eval()
     all_logits, all_labels = [], []
     with torch.no_grad():
         for images, labels in loader:
             images = gpu_normalize(images.to(device))
-            logits = model(images)
-            all_logits.append(logits.cpu().numpy())
+            with torch.cuda.amp.autocast(enabled=(device.type == "cuda")):
+                logits = model(images)
+            all_logits.append(logits.float().cpu().numpy())
             all_labels.extend(labels.numpy())
 
     logits = np.concatenate(all_logits, axis=0) / temp
@@ -495,7 +548,11 @@ def run_occlusion_experiment(model: SoftCAMEfficientNet, idrid_ds: RetinopathyDa
 # ==============================================================================
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Device: {device}")
+    n_gpus = torch.cuda.device_count()
+    print(f"Device: {device} | Total GPUs available: {n_gpus}")
+    if n_gpus > 0:
+        for i in range(n_gpus):
+            print(f"  GPU {i}: {torch.cuda.get_device_name(i)}")
 
     # Step 1: Train SoftCAM
     model, optimal_t = train_softcam(device)
